@@ -1,0 +1,81 @@
+name: Spore Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create (e.g., v0.1.0)'
+        required: true
+        type: string
+      name:
+        description: 'Release name (defaults to tag)'
+        required: false
+        type: string
+      draft:
+        description: 'Create as draft release'
+        required: false
+        default: true
+        type: boolean
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine working directory
+        id: workdir
+        run: |
+          if [ -d bore-erlang ]; then
+            echo "WORKDIR=bore-erlang" >> $GITHUB_ENV
+          else
+            echo "WORKDIR=." >> $GITHUB_ENV
+          fi
+          echo "Using WORKDIR=$WORKDIR"
+
+      - name: Set up Elixir and Erlang/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '26'
+          elixir-version: '1.16'
+
+      - name: Install deps
+        working-directory: ${{ env.WORKDIR }}
+        run: mix deps.get
+
+      - name: Build escript (prod)
+        working-directory: ${{ env.WORKDIR }}
+        run: MIX_ENV=prod mix escript.build
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          cp "$WORKDIR/spore" dist/spore
+          chmod +x dist/spore
+
+      - name: Create Git tag
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          git tag "${{ inputs.tag }}"
+          git push origin "${{ inputs.tag }}"
+
+      - name: Create GitHub Release (draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.name || inputs.tag }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          files: |
+            dist/spore
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
