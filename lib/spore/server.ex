@@ -45,14 +45,15 @@ defmodule Spore.Server do
 
     # pending connections managed by Spore.Pending
 
-    control_opts = [
-      :binary,
-      {:ip, bind_addr},
-      active: false,
-      packet: 0,
-      reuseaddr: true,
-      nodelay: true
-    ] ++ Shared.socket_tune_opts()
+    control_opts =
+      [
+        :binary,
+        {:ip, bind_addr},
+        active: false,
+        packet: 0,
+        reuseaddr: true,
+        nodelay: true
+      ] ++ Shared.socket_tune_opts()
 
     with {:ok, listen_socket} <- :gen_tcp.listen(Shared.control_port(), control_opts) do
       Logger.info("server listening on #{:inet.ntoa(bind_addr)}:#{Shared.control_port()}")

@@ -9,6 +9,7 @@ defmodule Spore.Application do
       {DynamicSupervisor, name: Spore.Pending.Supervisor, strategy: :one_for_one},
       {Spore.Pending, []}
     ]
+
     opts = [strategy: :one_for_one, name: Spore.Supervisor]
     Supervisor.start_link(children, opts)
   end

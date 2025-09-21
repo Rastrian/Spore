@@ -34,6 +34,7 @@ defmodule Spore.PendingConnection do
       :gen_tcp.close(socket)
       Logger.warning("removed stale connection #{id}")
     end
+
     {:stop, :normal, %{state | socket: nil}}
   end
 

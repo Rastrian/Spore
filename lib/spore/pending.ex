@@ -19,6 +19,7 @@ defmodule Spore.Pending do
       start: {PendingConnection, :start_link, [[id: id, socket: socket, ttl_ms: ttl_ms]]},
       restart: :temporary
     }
+
     DynamicSupervisor.start_child(Spore.Pending.Supervisor, child_spec)
     :ok
   end

@@ -101,39 +101,47 @@ defmodule Spore.Shared do
   @doc "Connect with timeout, returning a passive, binary-mode socket."
   @spec connect(String.t(), :inet.port_number(), timeout()) :: {:ok, socket()} | {:error, term()}
   def connect(host, port, timeout_ms) do
-    result = :gen_tcp.connect(
-      String.to_charlist(host),
-      port,
-      [:binary, active: false, packet: 0, nodelay: true, reuseaddr: true],
-      timeout_ms
-    )
+    result =
+      :gen_tcp.connect(
+        String.to_charlist(host),
+        port,
+        [:binary, active: false, packet: 0, nodelay: true, reuseaddr: true],
+        timeout_ms
+      )
+
     case result do
       {:ok, socket} ->
         _ = tune_socket(socket)
         {:ok, socket}
-      other -> other
+
+      other ->
+        other
     end
   end
 
   @doc "Return socket tuning options from application env."
   def socket_tune_opts do
     opts = []
+
     opts =
       case Application.get_env(:spore, :sndbuf) do
         n when is_integer(n) and n > 0 -> [{:sndbuf, n} | opts]
         _ -> opts
       end
+
     opts =
       case Application.get_env(:spore, :recbuf) do
         n when is_integer(n) and n > 0 -> [{:recbuf, n} | opts]
         _ -> opts
       end
+
     opts
   end
 
   @doc "Apply tuning options to a socket."
   def tune_socket(socket) do
     opts = socket_tune_opts()
+
     case opts do
       [] -> :ok
       _ -> :inet.setopts(socket, opts)
