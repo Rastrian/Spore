@@ -58,3 +58,11 @@ jobs:
       - name: Verify escript
         working-directory: ${{ env.WORKDIR }}
         run: test -x ./spore && ls -l ./spore
+
+      - name: Upload artifact (spore)
+        uses: actions/upload-artifact@v4
+        with:
+          name: spore-${{ runner.os }}-${{ github.sha }}
+          path: ${{ env.WORKDIR }}/spore
+          if-no-files-found: error
+          retention-days: 14

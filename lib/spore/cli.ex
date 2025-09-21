@@ -22,6 +22,9 @@ defmodule Spore.CLI do
           port: :integer,
           secret: :string,
           control_port: :integer,
+          tls: :boolean,
+          cacertfile: :string,
+          insecure: :boolean,
           sndbuf: :integer,
           recbuf: :integer
         ],
@@ -36,6 +39,9 @@ defmodule Spore.CLI do
     control_port = Keyword.get(opts, :control_port, nil)
 
     if control_port, do: Application.put_env(:spore, :control_port, control_port)
+    if Keyword.get(opts, :tls), do: Application.put_env(:spore, :tls, true)
+    if cacert = Keyword.get(opts, :cacertfile), do: Application.put_env(:spore, :cacertfile, cacert)
+    if Keyword.get(opts, :insecure), do: Application.put_env(:spore, :ssl_verify, false)
     if sndbuf = Keyword.get(opts, :sndbuf), do: Application.put_env(:spore, :sndbuf, sndbuf)
     if recbuf = Keyword.get(opts, :recbuf), do: Application.put_env(:spore, :recbuf, recbuf)
 
@@ -61,6 +67,12 @@ defmodule Spore.CLI do
           bind_addr: :string,
           bind_tunnels: :string,
           control_port: :integer,
+          tls: :boolean,
+          certfile: :string,
+          keyfile: :string,
+          allow: :string,
+          deny: :string,
+          max_conns_per_ip: :integer,
           sndbuf: :integer,
           recbuf: :integer
         ]
@@ -74,6 +86,12 @@ defmodule Spore.CLI do
     control_port = Keyword.get(opts, :control_port, nil)
 
     if control_port, do: Application.put_env(:spore, :control_port, control_port)
+    if Keyword.get(opts, :tls), do: Application.put_env(:spore, :tls, true)
+    if cert = Keyword.get(opts, :certfile), do: Application.put_env(:spore, :certfile, cert)
+    if key = Keyword.get(opts, :keyfile), do: Application.put_env(:spore, :keyfile, key)
+    if allow = Keyword.get(opts, :allow), do: Application.put_env(:spore, :allow, Spore.ACL.parse_list(allow))
+    if deny = Keyword.get(opts, :deny), do: Application.put_env(:spore, :deny, Spore.ACL.parse_list(deny))
+    if m = Keyword.get(opts, :max_conns_per_ip), do: Application.put_env(:spore, :max_conns_per_ip, m)
     if sndbuf = Keyword.get(opts, :sndbuf), do: Application.put_env(:spore, :sndbuf, sndbuf)
     if recbuf = Keyword.get(opts, :recbuf), do: Application.put_env(:spore, :recbuf, recbuf)
 
@@ -92,8 +110,8 @@ defmodule Spore.CLI do
   defp usage(io) do
     IO.puts(io, """
     Usage:
-      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET] [--control-port N] [--sndbuf N] [--recbuf N]
-      spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--control-port N] [--sndbuf N] [--recbuf N]
+      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET] [--control-port N] [--tls] [--cacertfile PATH] [--insecure] [--sndbuf N] [--recbuf N]
+      spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--control-port N] [--tls] [--certfile PATH] [--keyfile PATH] [--allow CIDRs] [--deny CIDRs] [--max-conns-per-ip N] [--sndbuf N] [--recbuf N]
     """)
   end
 end
