@@ -20,7 +20,8 @@ defmodule Spore.CLI do
           local_host: :string,
           to: :string,
           port: :integer,
-          secret: :string
+          secret: :string,
+          control_port: :integer
         ],
         aliases: [p: :port]
       )
@@ -30,6 +31,9 @@ defmodule Spore.CLI do
     to = Keyword.fetch!(opts, :to)
     port = Keyword.get(opts, :port, 0)
     secret = Keyword.get(opts, :secret, nil)
+    control_port = Keyword.get(opts, :control_port, nil)
+
+    if control_port, do: Application.put_env(:spore, :control_port, control_port)
 
     case Spore.Client.new(local_host, local_port, to, port, secret) do
       {:ok, client} ->
@@ -51,7 +55,8 @@ defmodule Spore.CLI do
           max_port: :integer,
           secret: :string,
           bind_addr: :string,
-          bind_tunnels: :string
+          bind_tunnels: :string,
+          control_port: :integer
         ]
       )
 
@@ -60,6 +65,9 @@ defmodule Spore.CLI do
     secret = Keyword.get(opts, :secret, nil)
     bind_addr = Keyword.get(opts, :bind_addr, "0.0.0.0")
     bind_tunnels = Keyword.get(opts, :bind_tunnels, nil)
+    control_port = Keyword.get(opts, :control_port, nil)
+
+    if control_port, do: Application.put_env(:spore, :control_port, control_port)
 
     case Spore.Server.listen(
            min_port: min_port,
@@ -76,8 +84,8 @@ defmodule Spore.CLI do
   defp usage(io) do
     IO.puts(io, """
     Usage:
-      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET]
-      spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP]
+      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET] [--control-port N]
+      spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--control-port N]
     """)
   end
 end
