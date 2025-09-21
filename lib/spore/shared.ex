@@ -160,10 +160,15 @@ defmodule Spore.Shared do
   end
 
   defp ssl_client_opts do
-    verify = if Application.get_env(:spore, :ssl_verify, false), do: :verify_peer, else: :verify_none
+    verify =
+      if Application.get_env(:spore, :ssl_verify, false), do: :verify_peer, else: :verify_none
+
     base = [active: false, verify: verify]
     cacertfile = Application.get_env(:spore, :cacertfile)
-    if is_binary(cacertfile), do: [{:cacertfile, String.to_charlist(cacertfile)} | base], else: base
+
+    if is_binary(cacertfile),
+      do: [{:cacertfile, String.to_charlist(cacertfile)} | base],
+      else: base
   end
 
   @doc "Bidirectionally pipe data between two sockets until either closes."
@@ -193,10 +198,12 @@ defmodule Spore.Shared do
     right = Task.async(fn -> pipe(b, bmod, a, amod) end)
     ref_left = Process.monitor(left.pid)
     ref_right = Process.monitor(right.pid)
+
     receive do
       {:DOWN, ^ref_left, :process, _pid, _} -> :ok
       {:DOWN, ^ref_right, :process, _pid, _} -> :ok
     end
+
     Task.shutdown(left, :brutal_kill)
     Task.shutdown(right, :brutal_kill)
     close(a, amod)

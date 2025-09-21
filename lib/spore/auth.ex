@@ -18,12 +18,16 @@ defmodule Spore.Auth do
   @doc "Create multiple authenticators from a comma-separated list."
   def new_many(secret_or_list) do
     cond do
-      is_list(secret_or_list) -> Enum.map(secret_or_list, &new/1)
+      is_list(secret_or_list) ->
+        Enum.map(secret_or_list, &new/1)
+
       is_binary(secret_or_list) ->
         secret_or_list
         |> String.split([",", " ", "\n"], trim: true)
         |> Enum.map(&new/1)
-      true -> []
+
+      true ->
+        []
     end
   end
 
@@ -67,11 +71,14 @@ defmodule Spore.Auth do
   def server_handshake_many(auths, d) when is_list(auths) and auths != [] do
     challenge = generate_uuid_v4()
     {:ok, _} = Spore.Shared.Delimited.send(d, %{"Challenge" => challenge})
+
     case Spore.Shared.Delimited.recv_timeout(d) do
       {%{"Authenticate" => tag}, d2} ->
         ok = Enum.any?(auths, fn a -> validate(a, challenge, tag) end)
         if ok, do: {:ok, d2}, else: {{:error, :invalid_secret}, d2}
-      {_, d2} -> {{:error, :missing_authentication}, d2}
+
+      {_, d2} ->
+        {{:error, :missing_authentication}, d2}
     end
   end
 

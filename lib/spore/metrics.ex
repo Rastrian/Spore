@@ -31,12 +31,15 @@ defmodule Spore.Metrics do
 
   def note_accept(id) do
     now = System.monotonic_time(:millisecond)
+
     case :ets.take(@accept_ts_table, id) do
       [{^id, ts}] ->
         inc(:spore_connections_accepted_total, 1)
         inc(:spore_accept_latency_ms_sum, max(0, now - ts))
         inc(:spore_accept_latency_ms_count, 1)
-      _ -> :ok
+
+      _ ->
+        :ok
     end
   end
 
@@ -56,7 +59,9 @@ defmodule Spore.Metrics do
       {:ok, ls} ->
         Logger.info("metrics listening on :#{port}")
         accept_loop(ls)
-      {:error, err} -> Logger.error("metrics listen failed: #{inspect(err)}")
+
+      {:error, err} ->
+        Logger.error("metrics listen failed: #{inspect(err)}")
     end
   end
 
@@ -65,26 +70,33 @@ defmodule Spore.Metrics do
       {:ok, sock} ->
         Task.start(fn -> serve(sock) end)
         accept_loop(ls)
-      {:error, _} -> :ok
+
+      {:error, _} ->
+        :ok
     end
   end
 
   defp serve(sock) do
     _ = :gen_tcp.recv(sock, 0, 100)
     body = render()
+
     resp = [
       "HTTP/1.1 200 OK\r\n",
       "Content-Type: text/plain; version=0.0.4\r\n",
-      "Content-Length: ", Integer.to_string(byte_size(body)), "\r\n",
+      "Content-Length: ",
+      Integer.to_string(byte_size(body)),
+      "\r\n",
       "Connection: close\r\n\r\n",
       body
     ]
+
     :gen_tcp.send(sock, resp)
     :gen_tcp.close(sock)
   end
 
   def render do
     rows = :ets.tab2list(@metrics_table)
+
     Enum.map_join(rows, "\n", fn {name, value} ->
       ["# TYPE ", Atom.to_string(name), " counter\n", Atom.to_string(name), " ", to_string(value)]
     end) <> "\n"

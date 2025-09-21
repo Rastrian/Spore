@@ -7,10 +7,11 @@ defmodule Spore.ACL do
     allow = Application.get_env(:spore, :allow, [])
     deny = Application.get_env(:spore, :deny, [])
 
-    allowed = case allow do
-      [] -> true
-      _ -> Enum.any?(allow, &match_ip?(ip, &1))
-    end
+    allowed =
+      case allow do
+        [] -> true
+        _ -> Enum.any?(allow, &match_ip?(ip, &1))
+      end
 
     denied = Enum.any?(deny, &match_ip?(ip, &1))
     allowed and not denied
@@ -31,6 +32,7 @@ defmodule Spore.ACL do
           {:ok, addr} -> {:ip, addr}
           _ -> nil
         end
+
       [ip, masklen] ->
         with {:ok, addr} <- :inet.parse_address(String.to_charlist(ip)),
              {len, ""} <- Integer.parse(masklen) do
@@ -42,12 +44,15 @@ defmodule Spore.ACL do
   end
 
   defp match_ip?(ip, {:ip, addr}), do: ip == addr
-  defp match_ip?({a,b,c,d}, {:cidr, {a2,b2,c2,d2}, len}) when is_integer(len) and len>=0 and len<=32 do
+
+  defp match_ip?({a, b, c, d}, {:cidr, {a2, b2, c2, d2}, len})
+       when is_integer(len) and len >= 0 and len <= 32 do
     mask = bnot((1 <<< (32 - len)) - 1) &&& 0xFFFFFFFF
-    ipi = (a<<<24) + (b<<<16) + (c<<<8) + d
-    base = (a2<<<24) + (b2<<<16) + (c2<<<8) + d2
+    ipi = (a <<< 24) + (b <<< 16) + (c <<< 8) + d
+    base = (a2 <<< 24) + (b2 <<< 16) + (c2 <<< 8) + d2
     (ipi &&& mask) == (base &&& mask)
   end
-  defp match_ip?({_,_,_,_,_,_,_,_}, {:cidr, _, _}), do: false
+
+  defp match_ip?({_, _, _, _, _, _, _, _}, {:cidr, _, _}), do: false
   defp match_ip?(_, _), do: false
 end

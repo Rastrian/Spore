@@ -30,7 +30,9 @@ defmodule Spore.Server do
 
     auth =
       case Keyword.get(opts, :secret) do
-        nil -> nil
+        nil ->
+          nil
+
         secret ->
           case Spore.Auth.new_many(secret) do
             [one] -> one
@@ -69,6 +71,7 @@ defmodule Spore.Server do
     {:ok, socket} = accept_conn(listen_socket)
     {:ok, {ip, _}} = :inet.peername(socket)
     Logger.info("incoming connection from #{:inet.ntoa(ip)}")
+
     if Spore.ACL.allow?(ip) and Spore.Limits.can_open?(ip) do
       Task.start(fn ->
         try do
@@ -80,6 +83,7 @@ defmodule Spore.Server do
     else
       :gen_tcp.close(socket)
     end
+
     accept_loop(listen_socket, port_range, auth, bind_tunnels)
   end
 
@@ -104,7 +108,9 @@ defmodule Spore.Server do
 
         {:many, list} ->
           case Auth.server_handshake_many(list, d) do
-            {:ok, d2} -> d2
+            {:ok, d2} ->
+              d2
+
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
               :gen_tcp.close(socket)
@@ -157,7 +163,9 @@ defmodule Spore.Server do
 
   defp listen_socket(control_opts) do
     case Shared.transport_mod() do
-      :gen_tcp -> :gen_tcp.listen(Shared.control_port(), control_opts)
+      :gen_tcp ->
+        :gen_tcp.listen(Shared.control_port(), control_opts)
+
       :ssl ->
         ssl_opts = ssl_server_opts(control_opts)
         apply(:ssl, :listen, [Shared.control_port(), ssl_opts])
@@ -166,7 +174,9 @@ defmodule Spore.Server do
 
   defp accept_conn(listen_socket) do
     case Shared.transport_mod() do
-      :gen_tcp -> :gen_tcp.accept(listen_socket)
+      :gen_tcp ->
+        :gen_tcp.accept(listen_socket)
+
       :ssl ->
         with {:ok, sock} <- apply(:ssl, :transport_accept, [listen_socket]) do
           apply(:ssl, :ssl_accept, [sock])
@@ -177,11 +187,13 @@ defmodule Spore.Server do
   defp ssl_server_opts(control_opts) do
     certfile = Application.get_env(:spore, :certfile)
     keyfile = Application.get_env(:spore, :keyfile)
+
     base = [
       {:certfile, String.to_charlist(certfile || "")},
       {:keyfile, String.to_charlist(keyfile || "")},
       active: false
     ]
+
     base ++ control_opts
   end
 
