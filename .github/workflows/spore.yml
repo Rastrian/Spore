@@ -1,39 +1,60 @@
 name: Spore CI
+
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: bore-erlang
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Determine working directory
+        id: workdir
+        run: |
+          if [ -d bore-erlang ]; then
+            echo "WORKDIR=bore-erlang" >> $GITHUB_ENV
+          else
+            echo "WORKDIR=." >> $GITHUB_ENV
+          fi
+          echo "Using WORKDIR=$WORKDIR"
+
       - name: Set up Elixir and Erlang/OTP
         uses: erlef/setup-beam@v1
         with:
           otp-version: '26'
           elixir-version: '1.16'
+
       - name: Cache deps
         uses: actions/cache@v4
         with:
           path: |
-            bore-erlang/deps
-            bore-erlang/_build
-          key: ${{ runner.os }}-mix-${{ hashFiles('bore-erlang/mix.lock') }}
+            ${{ env.WORKDIR }}/deps
+            ${{ env.WORKDIR }}/_build
+          key: ${{ runner.os }}-mix-${{ hashFiles(format('{0}/mix.lock', env.WORKDIR)) }}
           restore-keys: |
             ${{ runner.os }}-mix-
+
       - name: Install deps
+        working-directory: ${{ env.WORKDIR }}
         run: mix deps.get
+
       - name: Check formatting
+        working-directory: ${{ env.WORKDIR }}
         run: mix format --check-formatted
+
       - name: Compile
+        working-directory: ${{ env.WORKDIR }}
         run: mix compile --warnings-as-errors
+
       - name: Build escript
+        working-directory: ${{ env.WORKDIR }}
         run: mix escript.build
+
       - name: Verify escript
+        working-directory: ${{ env.WORKDIR }}
         run: test -x ./spore && ls -l ./spore
