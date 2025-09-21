@@ -1,0 +1,19 @@
+# Mix / Elixir
+/_build/
+/deps/
+/.elixir_ls/
+/cover/
+/doc/
+*.ez
+erl_crash.dump
+
+# Escript artifact
+/spore
+/spore.bat
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
