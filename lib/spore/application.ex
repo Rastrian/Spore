@@ -7,7 +7,9 @@ defmodule Spore.Application do
     children = [
       {Registry, keys: :unique, name: Spore.Pending.Registry},
       {DynamicSupervisor, name: Spore.Pending.Supervisor, strategy: :one_for_one},
-      {Spore.Pending, []}
+      {Spore.Pending, []},
+      {Spore.Limits, []},
+      {Spore.Metrics, []}
     ]
 
     opts = [strategy: :one_for_one, name: Spore.Supervisor]

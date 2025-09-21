@@ -30,8 +30,14 @@ defmodule Spore.Server do
 
     auth =
       case Keyword.get(opts, :secret) do
-        nil -> nil
-        secret -> Auth.new(secret)
+        nil ->
+          nil
+
+        secret ->
+          case Spore.Auth.new_many(secret) do
+            [one] -> one
+            many when is_list(many) -> {:many, many}
+          end
       end
 
     bind_addr = Keyword.get(opts, :bind_addr, {0, 0, 0, 0}) |> normalize_ip()
@@ -55,23 +61,34 @@ defmodule Spore.Server do
         nodelay: true
       ] ++ Shared.socket_tune_opts()
 
-    with {:ok, listen_socket} <- :gen_tcp.listen(Shared.control_port(), control_opts) do
+    with {:ok, listen_socket} <- listen_socket(control_opts) do
       Logger.info("server listening on #{:inet.ntoa(bind_addr)}:#{Shared.control_port()}")
       accept_loop(listen_socket, min_port..max_port, auth, bind_tunnels)
     end
   end
 
   defp accept_loop(listen_socket, port_range, auth, bind_tunnels) do
-    {:ok, socket} = :gen_tcp.accept(listen_socket)
-    _ = Shared.tune_socket(socket)
+    {:ok, socket} = accept_conn(listen_socket)
     {:ok, {ip, _}} = :inet.peername(socket)
     Logger.info("incoming connection from #{:inet.ntoa(ip)}")
-    Task.start(fn -> handle_connection(socket, port_range, auth, bind_tunnels) end)
+
+    if Spore.ACL.allow?(ip) and Spore.Limits.can_open?(ip) do
+      Task.start(fn ->
+        try do
+          handle_connection(socket, port_range, auth, bind_tunnels)
+        after
+          Spore.Limits.close(ip)
+        end
+      end)
+    else
+      :gen_tcp.close(socket)
+    end
+
     accept_loop(listen_socket, port_range, auth, bind_tunnels)
   end
 
   defp handle_connection(socket, port_range, auth, bind_tunnels) do
-    d = Delimited.new(socket)
+    d = Delimited.new(socket, Shared.transport_mod())
 
     d =
       case auth do
@@ -80,6 +97,17 @@ defmodule Spore.Server do
 
         %{} = a ->
           case Auth.server_handshake(a, d) do
+            {:ok, d2} ->
+              d2
+
+            {{:error, reason}, d2} ->
+              _ = Delimited.send(d2, %{"Error" => to_string(reason)})
+              :gen_tcp.close(socket)
+              exit(:normal)
+          end
+
+        {:many, list} ->
+          case Auth.server_handshake_many(list, d) do
             {:ok, d2} ->
               d2
 
@@ -106,10 +134,11 @@ defmodule Spore.Server do
       {%{"Accept" => id}, d2} ->
         case Spore.Pending.take(id) do
           {:ok, stream2} ->
+            Spore.Metrics.note_accept(id)
             # Forward traffic bidirectionally between control socket and stored tunnel conn
             # buffer intentionally unused
             _ = d2
-            Shared.pipe_bidirectional(socket, stream2)
+            Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
 
           :error ->
             Logger.warning("missing connection #{id}")
@@ -132,12 +161,49 @@ defmodule Spore.Server do
     e -> Logger.warning("connection exited with error: #{inspect(e)}")
   end
 
+  defp listen_socket(control_opts) do
+    case Shared.transport_mod() do
+      :gen_tcp ->
+        :gen_tcp.listen(Shared.control_port(), control_opts)
+
+      :ssl ->
+        ssl_opts = ssl_server_opts(control_opts)
+        apply(:ssl, :listen, [Shared.control_port(), ssl_opts])
+    end
+  end
+
+  defp accept_conn(listen_socket) do
+    case Shared.transport_mod() do
+      :gen_tcp ->
+        :gen_tcp.accept(listen_socket)
+
+      :ssl ->
+        with {:ok, sock} <- apply(:ssl, :transport_accept, [listen_socket]) do
+          apply(:ssl, :ssl_accept, [sock])
+        end
+    end
+  end
+
+  defp ssl_server_opts(control_opts) do
+    certfile = Application.get_env(:spore, :certfile)
+    keyfile = Application.get_env(:spore, :keyfile)
+
+    base = [
+      {:certfile, String.to_charlist(certfile || "")},
+      {:keyfile, String.to_charlist(keyfile || "")},
+      active: false
+    ]
+
+    base ++ control_opts
+  end
+
   defp hello_loop(d, listener) do
     case :gen_tcp.accept(listener, 0) do
       {:ok, stream2} ->
         _ = Shared.tune_socket(stream2)
         id = Auth.generate_uuid_v4()
         Spore.Pending.insert(id, stream2, 10_000)
+        Spore.Metrics.note_pending(id)
         _ = Delimited.send(d, %{"Connection" => id})
         hello_loop(send_heartbeat(d), listener)
 
@@ -209,7 +275,7 @@ defmodule Spore.Server do
 
   # Accept connection branch: a new control connection will send {"Accept": id}
   def handle_accept_connection(socket, auth) do
-    d = Delimited.new(socket)
+    d = Delimited.new(socket, Shared.transport_mod())
 
     d =
       case auth do

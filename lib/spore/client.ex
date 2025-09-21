@@ -24,7 +24,7 @@ defmodule Spore.Client do
           {:ok, t} | {:error, term()}
   def new(local_host, local_port, to, port, secret) do
     with {:ok, socket} <- Shared.connect(to, Shared.control_port(), Shared.network_timeout_ms()) do
-      d = Delimited.new(socket)
+      d = Delimited.new(socket, Shared.transport_mod())
       auth = if secret, do: Auth.new(secret), else: nil
 
       d =
@@ -121,7 +121,7 @@ defmodule Spore.Client do
   defp handle_connection(id, %__MODULE__{} = state) do
     with {:ok, remote_conn} <-
            Shared.connect(state.to, Shared.control_port(), Shared.network_timeout_ms()) do
-      d = Delimited.new(remote_conn)
+      d = Delimited.new(remote_conn, Shared.transport_mod())
 
       d =
         case state.auth do
@@ -140,7 +140,7 @@ defmodule Spore.Client do
       case Shared.connect(state.local_host, state.local_port, Shared.network_timeout_ms()) do
         {:ok, local_conn} ->
           # Any data already buffered in `d` is intentionally not forwarded; see Rust note
-          Shared.pipe_bidirectional(remote_conn, local_conn)
+          Shared.pipe_bidirectional(remote_conn, Shared.transport_mod(), local_conn, :gen_tcp)
 
         {:error, reason} ->
           :gen_tcp.close(remote_conn)
