@@ -10,8 +10,10 @@ defmodule Spore.Shared do
   @max_frame_length 256
   @network_timeout_ms 3_000
 
-  @doc "TCP port used for control connections with the server."
-  def control_port, do: @control_port
+  @doc "TCP port used for control connections with the server. Can be overridden via Application env :spore, :control_port."
+  def control_port do
+    Application.get_env(:spore, :control_port, @control_port)
+  end
 
   @doc "Default timeout for initial network operations (ms)."
   def network_timeout_ms, do: @network_timeout_ms
