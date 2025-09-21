@@ -43,7 +43,7 @@ defmodule Spore.Server do
         x -> normalize_ip(x)
       end
 
-    ensure_conns_table()
+    # pending connections managed by Spore.Pending
 
     control_opts = [
       :binary,
@@ -52,7 +52,7 @@ defmodule Spore.Server do
       packet: 0,
       reuseaddr: true,
       nodelay: true
-    ]
+    ] ++ Shared.socket_tune_opts()
 
     with {:ok, listen_socket} <- :gen_tcp.listen(Shared.control_port(), control_opts) do
       Logger.info("server listening on #{:inet.ntoa(bind_addr)}:#{Shared.control_port()}")
@@ -62,6 +62,7 @@ defmodule Spore.Server do
 
   defp accept_loop(listen_socket, port_range, auth, bind_tunnels) do
     {:ok, socket} = :gen_tcp.accept(listen_socket)
+    _ = Shared.tune_socket(socket)
     {:ok, {ip, _}} = :inet.peername(socket)
     Logger.info("incoming connection from #{:inet.ntoa(ip)}")
     Task.start(fn -> handle_connection(socket, port_range, auth, bind_tunnels) end)
@@ -102,7 +103,7 @@ defmodule Spore.Server do
         end
 
       {%{"Accept" => id}, d2} ->
-        case take_conn(id) do
+        case Spore.Pending.take(id) do
           {:ok, stream2} ->
             # Forward traffic bidirectionally between control socket and stored tunnel conn
             # buffer intentionally unused
@@ -133,8 +134,9 @@ defmodule Spore.Server do
   defp hello_loop(d, listener) do
     case :gen_tcp.accept(listener, 0) do
       {:ok, stream2} ->
+        _ = Shared.tune_socket(stream2)
         id = Auth.generate_uuid_v4()
-        insert_conn(id, stream2)
+        Spore.Pending.insert(id, stream2, 10_000)
         _ = Delimited.send(d, %{"Connection" => id})
         hello_loop(send_heartbeat(d), listener)
 
@@ -222,7 +224,7 @@ defmodule Spore.Server do
 
     case Delimited.recv_timeout(d) do
       {%{"Accept" => id}, d2} ->
-        case take_conn(id) do
+        case Spore.Pending.take(id) do
           {:ok, stream2} ->
             # Any buffered bytes already in d2.buffer are not handled here by design, as most cases buffer is empty
             {:ok, parts} = :inet.getopts(socket, [:active])
@@ -242,32 +244,7 @@ defmodule Spore.Server do
     end
   end
 
-  defp ensure_conns_table do
-    case :ets.whereis(:spore_conns) do
-      :undefined -> :ets.new(:spore_conns, [:set, :public, :named_table])
-      _ -> :ok
-    end
-  end
-
-  defp insert_conn(id, socket) do
-    :ets.insert(:spore_conns, {id, socket})
-    # Remove stale entries after 10s
-    Task.start(fn ->
-      :timer.sleep(10_000)
-
-      case :ets.take(:spore_conns, id) do
-        [{^id, _}] -> Logger.warning("removed stale connection #{id}")
-        _ -> :ok
-      end
-    end)
-  end
-
-  defp take_conn(id) do
-    case :ets.take(:spore_conns, id) do
-      [{^id, socket}] -> {:ok, socket}
-      _ -> :error
-    end
-  end
+  # pending connection management moved to Spore.Pending
 
   defp normalize_ip({_, _, _, _} = ip), do: ip
   defp normalize_ip({_, _, _, _, _, _, _, _} = ip), do: ip
