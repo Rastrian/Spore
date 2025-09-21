@@ -4,7 +4,6 @@ defmodule Spore.Server do
   """
 
   require Logger
-  
 
   alias Spore.Shared
   alias Spore.Shared.Delimited
@@ -29,20 +28,32 @@ defmodule Spore.Server do
     max_port = Keyword.get(opts, :max_port, @default_max)
     if min_port > max_port, do: raise(ArgumentError, "port range is empty")
 
-    auth = case Keyword.get(opts, :secret) do
-      nil -> nil
-      secret -> Auth.new(secret)
-    end
+    auth =
+      case Keyword.get(opts, :secret) do
+        nil -> nil
+        secret -> Auth.new(secret)
+      end
 
     bind_addr = Keyword.get(opts, :bind_addr, {0, 0, 0, 0}) |> normalize_ip()
-    bind_tunnels = Keyword.get(opts, :bind_tunnels) |> case do
-      nil -> bind_addr
-      x -> normalize_ip(x)
-    end
+
+    bind_tunnels =
+      Keyword.get(opts, :bind_tunnels)
+      |> case do
+        nil -> bind_addr
+        x -> normalize_ip(x)
+      end
 
     ensure_conns_table()
 
-    control_opts = [:binary, {:ip, bind_addr}, active: false, packet: 0, reuseaddr: true, nodelay: true]
+    control_opts = [
+      :binary,
+      {:ip, bind_addr},
+      active: false,
+      packet: 0,
+      reuseaddr: true,
+      nodelay: true
+    ]
+
     with {:ok, listen_socket} <- :gen_tcp.listen(Shared.control_port(), control_opts) do
       Logger.info("server listening on #{:inet.ntoa(bind_addr)}:#{Shared.control_port()}")
       accept_loop(listen_socket, min_port..max_port, auth, bind_tunnels)
@@ -59,12 +70,17 @@ defmodule Spore.Server do
 
   defp handle_connection(socket, port_range, auth, bind_tunnels) do
     d = Delimited.new(socket)
+
     d =
       case auth do
-        nil -> d
+        nil ->
+          d
+
         %{} = a ->
           case Auth.server_handshake(a, d) do
-            {:ok, d2} -> d2
+            {:ok, d2} ->
+              d2
+
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
               :gen_tcp.close(socket)
@@ -80,24 +96,35 @@ defmodule Spore.Server do
             Logger.info("new client on port #{actual}")
             {:ok, d3} = Delimited.send(d2, %{"Hello" => actual})
             hello_loop(d3, listener)
+
           {:error, message} ->
             _ = Delimited.send(d2, %{"Error" => message})
         end
+
       {%{"Accept" => id}, d2} ->
         case take_conn(id) do
           {:ok, stream2} ->
             # Forward traffic bidirectionally between control socket and stored tunnel conn
-            _ = d2 # buffer intentionally unused
+            # buffer intentionally unused
+            _ = d2
             Shared.pipe_bidirectional(socket, stream2)
+
           :error ->
             Logger.warning("missing connection #{id}")
         end
+
       {%{"Authenticate" => _}, _d2} ->
         Logger.warning("unexpected authenticate")
         :ok
-      {:eof, _} -> :ok
-      {{:error, _}, _} -> :ok
-      {_, _d2} -> :ok
+
+      {:eof, _} ->
+        :ok
+
+      {{:error, _}, _} ->
+        :ok
+
+      {_, _d2} ->
+        :ok
     end
   rescue
     e -> Logger.warning("connection exited with error: #{inspect(e)}")
@@ -110,10 +137,13 @@ defmodule Spore.Server do
         insert_conn(id, stream2)
         _ = Delimited.send(d, %{"Connection" => id})
         hello_loop(send_heartbeat(d), listener)
+
       {:error, :timeout} ->
         :timer.sleep(@heartbeat_ms)
         hello_loop(send_heartbeat(d), listener)
-      {:error, _} -> :ok
+
+      {:error, _} ->
+        :ok
     end
   end
 
@@ -127,6 +157,7 @@ defmodule Spore.Server do
   defp create_listener(port, range, bind_ip) do
     min = range.first
     max = range.last
+
     cond do
       is_integer(port) and port > 0 ->
         if port < min or port > max do
@@ -134,6 +165,7 @@ defmodule Spore.Server do
         else
           bind_tunnel(bind_ip, port)
         end
+
       true ->
         # Try 150 random ports within range
         attempts = 150
@@ -142,10 +174,12 @@ defmodule Spore.Server do
   end
 
   defp try_random(0, _range, _ip), do: {:error, "failed to find an available port"}
+
   defp try_random(n, range, ip) do
     min = range.first
     max = range.last
     port = min + :rand.uniform(max - min + 1) - 1
+
     case bind_tunnel(ip, port) do
       {:ok, l} -> {:ok, l}
       {:error, _} -> try_random(n - 1, range, ip)
@@ -153,7 +187,16 @@ defmodule Spore.Server do
   end
 
   defp bind_tunnel(ip, port) do
-    case :gen_tcp.listen(port, [:binary, {:ip, ip}, {:backlog, 1024}, {:send_timeout_close, true}, active: false, packet: 0, reuseaddr: true, nodelay: true]) do
+    case :gen_tcp.listen(port, [
+           :binary,
+           {:ip, ip},
+           {:backlog, 1024},
+           {:send_timeout_close, true},
+           active: false,
+           packet: 0,
+           reuseaddr: true,
+           nodelay: true
+         ]) do
       {:ok, l} -> {:ok, l}
       {:error, :eaddrinuse} -> {:error, "port already in use"}
       {:error, :eacces} -> {:error, "permission denied"}
@@ -164,15 +207,19 @@ defmodule Spore.Server do
   # Accept connection branch: a new control connection will send {"Accept": id}
   def handle_accept_connection(socket, auth) do
     d = Delimited.new(socket)
+
     d =
       case auth do
-        nil -> d
+        nil ->
+          d
+
         %{} = a ->
           case Auth.client_handshake(a, d) do
             {:ok, d2} -> d2
             {{:error, _}, d2} -> d2
           end
       end
+
     case Delimited.recv_timeout(d) do
       {%{"Accept" => id}, d2} ->
         case take_conn(id) do
@@ -182,12 +229,16 @@ defmodule Spore.Server do
             _ = parts
             # Switch to raw piping between sockets
             Shared.pipe_bidirectional(socket, stream2)
+
           :error ->
             Logger.warning("missing connection #{id}")
             :ok
         end
+
         _ = d2
-      _ -> :ok
+
+      _ ->
+        :ok
     end
   end
 
@@ -203,6 +254,7 @@ defmodule Spore.Server do
     # Remove stale entries after 10s
     Task.start(fn ->
       :timer.sleep(10_000)
+
       case :ets.take(:spore_conns, id) do
         [{^id, _}] -> Logger.warning("removed stale connection #{id}")
         _ -> :ok
@@ -219,6 +271,7 @@ defmodule Spore.Server do
 
   defp normalize_ip({_, _, _, _} = ip), do: ip
   defp normalize_ip({_, _, _, _, _, _, _, _} = ip), do: ip
+
   defp normalize_ip(str) when is_binary(str) do
     case :inet.parse_address(String.to_charlist(str)) do
       {:ok, ip} -> ip
@@ -226,5 +279,3 @@ defmodule Spore.Server do
     end
   end
 end
-
-

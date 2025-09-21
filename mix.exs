@@ -26,5 +26,3 @@ defmodule Spore.MixProject do
     ]
   end
 end
-
-

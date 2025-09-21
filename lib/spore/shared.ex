@@ -40,8 +40,12 @@ defmodule Spore.Shared do
             {:ok, value} -> {value, d2}
             {:error, err} -> {{:error, {:decode_error, err}}, d2}
           end
-        {:eof, d2} -> {:eof, d2}
-        {:error, err, d2} -> {{:error, err}, d2}
+
+        {:eof, d2} ->
+          {:eof, d2}
+
+        {:error, err, d2} ->
+          {{:error, err}, d2}
       end
     end
 
@@ -67,18 +71,26 @@ defmodule Spore.Shared do
         {idx, 1} ->
           <<frame::binary-size(idx), _zero, rest::binary>> = buf
           {:ok, frame, %{d | buffer: rest}}
+
         :nomatch ->
           case :gen_tcp.recv(socket, 0, timeout) do
             {:ok, more} ->
               new = buf <> more
+
               if byte_size(new) > Spore.Shared.max_frame_length() do
                 {:error, :frame_too_large, %{d | buffer: new}}
               else
                 read_frame(%{d | buffer: new}, timeout)
               end
-            {:error, :timeout} -> {:error, :timeout, d}
-            {:error, :closed} -> {:eof, d}
-            {:error, reason} -> {:error, reason, d}
+
+            {:error, :timeout} ->
+              {:error, :timeout, d}
+
+            {:error, :closed} ->
+              {:eof, d}
+
+            {:error, reason} ->
+              {:error, reason, d}
           end
       end
     end
@@ -87,7 +99,12 @@ defmodule Spore.Shared do
   @doc "Connect with timeout, returning a passive, binary-mode socket."
   @spec connect(String.t(), :inet.port_number(), timeout()) :: {:ok, socket()} | {:error, term()}
   def connect(host, port, timeout_ms) do
-    :gen_tcp.connect(String.to_charlist(host), port, [:binary, active: false, packet: 0, nodelay: true, reuseaddr: true], timeout_ms)
+    :gen_tcp.connect(
+      String.to_charlist(host),
+      port,
+      [:binary, active: false, packet: 0, nodelay: true, reuseaddr: true],
+      timeout_ms
+    )
   end
 
   @doc "Bidirectionally pipe data between two sockets until either closes."
@@ -97,10 +114,12 @@ defmodule Spore.Shared do
     right = Task.async(fn -> pipe(b, a) end)
     ref_left = Process.monitor(left.pid)
     ref_right = Process.monitor(right.pid)
+
     receive do
       {:DOWN, ^ref_left, :process, _pid, _} -> :ok
       {:DOWN, ^ref_right, :process, _pid, _} -> :ok
     end
+
     Task.shutdown(left, :brutal_kill)
     Task.shutdown(right, :brutal_kill)
     :gen_tcp.close(a)
@@ -113,9 +132,9 @@ defmodule Spore.Shared do
       {:ok, data} ->
         _ = :gen_tcp.send(dst, data)
         pipe(src, dst)
-      {:error, _} -> :ok
+
+      {:error, _} ->
+        :ok
     end
   end
 end
-
-

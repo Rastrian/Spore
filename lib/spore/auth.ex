@@ -37,6 +37,7 @@ defmodule Spore.Auth do
   def server_handshake(%{key: _} = auth, d) do
     challenge = generate_uuid_v4()
     {:ok, _} = Spore.Shared.Delimited.send(d, %{"Challenge" => challenge})
+
     case Spore.Shared.Delimited.recv_timeout(d) do
       {%{"Authenticate" => tag}, d2} ->
         if validate(auth, challenge, tag) do
@@ -44,7 +45,9 @@ defmodule Spore.Auth do
         else
           {{:error, :invalid_secret}, d2}
         end
-      {_, d2} -> {{:error, :missing_authentication}, d2}
+
+      {_, d2} ->
+        {{:error, :missing_authentication}, d2}
     end
   end
 
@@ -55,7 +58,9 @@ defmodule Spore.Auth do
         tag = answer(auth, challenge)
         {:ok, d3} = Spore.Shared.Delimited.send(d2, %{"Authenticate" => tag})
         {:ok, d3}
-      {_, d2} -> {{:error, :unexpected_no_challenge}, d2}
+
+      {_, d2} ->
+        {{:error, :unexpected_no_challenge}, d2}
     end
   end
 
@@ -66,13 +71,16 @@ defmodule Spore.Auth do
     # Set version 4 and variant 2
     c = bor(c, 0x4000) &&& 0x4FFF
     d = bor(d, 0x8000) &&& 0xBFFF
-    :io_lib.format("~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b", [a, b, c, d, e]) |> to_string()
+
+    :io_lib.format("~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b", [a, b, c, d, e])
+    |> to_string()
   end
 
   @doc "Parse hyphenated UUID string into 16 raw bytes. Raises on error."
   @spec uuid_to_bytes!(String.t()) :: binary()
   def uuid_to_bytes!(uuid) do
     hex = String.replace(uuid, "-", "")
+
     case Base.decode16(hex, case: :mixed) do
       {:ok, bin} when byte_size(bin) == 16 -> bin
       _ -> raise ArgumentError, "invalid UUID: #{uuid}"
@@ -82,9 +90,10 @@ defmodule Spore.Auth do
   defp secure_compare(a, b) when is_binary(a) and is_binary(b) and byte_size(a) == byte_size(b) do
     a_bytes = :binary.bin_to_list(a)
     b_bytes = :binary.bin_to_list(b)
-    0 == Enum.reduce(Enum.zip(a_bytes, b_bytes), 0, fn {x, y}, acc -> acc ||| (Bitwise.bxor(x, y)) end)
+
+    0 ==
+      Enum.reduce(Enum.zip(a_bytes, b_bytes), 0, fn {x, y}, acc -> acc ||| Bitwise.bxor(x, y) end)
   end
+
   defp secure_compare(_a, _b), do: false
 end
-
-
