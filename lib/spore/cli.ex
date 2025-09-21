@@ -21,7 +21,9 @@ defmodule Spore.CLI do
           to: :string,
           port: :integer,
           secret: :string,
-          control_port: :integer
+          control_port: :integer,
+          sndbuf: :integer,
+          recbuf: :integer
         ],
         aliases: [p: :port]
       )
@@ -34,6 +36,8 @@ defmodule Spore.CLI do
     control_port = Keyword.get(opts, :control_port, nil)
 
     if control_port, do: Application.put_env(:spore, :control_port, control_port)
+    if sndbuf = Keyword.get(opts, :sndbuf), do: Application.put_env(:spore, :sndbuf, sndbuf)
+    if recbuf = Keyword.get(opts, :recbuf), do: Application.put_env(:spore, :recbuf, recbuf)
 
     case Spore.Client.new(local_host, local_port, to, port, secret) do
       {:ok, client} ->
@@ -56,7 +60,9 @@ defmodule Spore.CLI do
           secret: :string,
           bind_addr: :string,
           bind_tunnels: :string,
-          control_port: :integer
+          control_port: :integer,
+          sndbuf: :integer,
+          recbuf: :integer
         ]
       )
 
@@ -68,6 +74,8 @@ defmodule Spore.CLI do
     control_port = Keyword.get(opts, :control_port, nil)
 
     if control_port, do: Application.put_env(:spore, :control_port, control_port)
+    if sndbuf = Keyword.get(opts, :sndbuf), do: Application.put_env(:spore, :sndbuf, sndbuf)
+    if recbuf = Keyword.get(opts, :recbuf), do: Application.put_env(:spore, :recbuf, recbuf)
 
     case Spore.Server.listen(
            min_port: min_port,
@@ -84,8 +92,8 @@ defmodule Spore.CLI do
   defp usage(io) do
     IO.puts(io, """
     Usage:
-      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET] [--control-port N]
-      spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--control-port N]
+      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET] [--control-port N] [--sndbuf N] [--recbuf N]
+      spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--control-port N] [--sndbuf N] [--recbuf N]
     """)
   end
 end
