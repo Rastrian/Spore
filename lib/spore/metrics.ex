@@ -143,10 +143,17 @@ defmodule Spore.Metrics do
 
   def render do
     rows = :ets.tab2list(@metrics_table)
+    per_ip = Spore.Limits.snapshot()
+    pending = DynamicSupervisor.count_children(Spore.Pending.Supervisor).active
 
-    Enum.map_join(rows, "\n", fn {name, value} ->
-      ["# TYPE ", Atom.to_string(name), " counter\n", Atom.to_string(name), " ", to_string(value)]
-    end) <> "\n"
+    base = Enum.map(rows, fn {name, value} ->
+      ["# TYPE ", Atom.to_string(name), " counter\n", Atom.to_string(name), " ", to_string(value), "\n"]
+    end)
+    ip_lines = Enum.map(per_ip, fn {ip, count} ->
+      ["spore_conns_by_ip{ip=\"", :inet.ntoa(ip) |> to_string(), "\"} ", Integer.to_string(count), "\n"]
+    end)
+    pending_line = ["spore_pending_active ", Integer.to_string(pending), "\n"]
+    IO.iodata_to_binary(base ++ ip_lines ++ [pending_line])
   end
 
   defp state_render do

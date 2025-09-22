@@ -88,6 +88,7 @@ defmodule Spore.Server do
   end
 
   defp handle_connection(socket, port_range, auth, bind_tunnels) do
+    {:ok, {ip, _}} = :inet.peername(socket)
     d = Delimited.new(socket, Shared.transport_mod())
 
     d =
@@ -109,7 +110,13 @@ defmodule Spore.Server do
 
         {:many, list} ->
           case Auth.server_handshake_many(list, d) do
-            {:ok, d2} ->
+            {:ok, d2, auth_id} ->
+              if not Spore.SecretQuota.allow?(auth_id) do
+                _ = Delimited.send(d2, %{"Error" => "quota exceeded"})
+                :gen_tcp.close(socket)
+                exit(:normal)
+              end
+              Process.put({:spore_auth_id}, auth_id)
               d2
 
             {{:error, reason}, d2} ->
@@ -120,6 +127,7 @@ defmodule Spore.Server do
           end
       end
 
+    Spore.Tracing.with_span("spore.control_connection", %{"peer.ip" => :inet.ntoa(ip) |> to_string()}, fn ->
     case Delimited.recv_timeout(d) do
       {%{"HelloEx" => %{"port" => req_port}}, d2} ->
         case create_listener(req_port, port_range, bind_tunnels) do
@@ -176,8 +184,11 @@ defmodule Spore.Server do
       {_, _d2} ->
         :ok
     end
+    end)
   rescue
-    e -> Logger.warning("connection exited with error: #{inspect(e)}")
+    e ->
+      if auth_id = Process.get({:spore_auth_id}), do: Spore.SecretQuota.dec(auth_id)
+      Logger.warning("connection exited with error: #{inspect(e)}")
   end
 
   defp listen_socket(control_opts) do

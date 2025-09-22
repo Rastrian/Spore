@@ -188,49 +188,82 @@ defmodule Spore.Shared do
   @doc "Bidirectionally pipe data between two sockets until either closes."
   @spec pipe_bidirectional(socket(), socket()) :: :ok
   def pipe_bidirectional(a, b) do
-    left = Task.async(fn -> pipe(a, :gen_tcp, b, :gen_tcp) end)
-    right = Task.async(fn -> pipe(b, :gen_tcp, a, :gen_tcp) end)
-    ref_left = Process.monitor(left.pid)
-    ref_right = Process.monitor(right.pid)
-
-    receive do
-      {:DOWN, ^ref_left, :process, _pid, _} -> :ok
-      {:DOWN, ^ref_right, :process, _pid, _} -> :ok
+    if Application.get_env(:spore, :active_once, false) do
+      left = Task.async(fn -> pipe_active_once(a, :gen_tcp, b, :gen_tcp) end)
+      right = Task.async(fn -> pipe_active_once(b, :gen_tcp, a, :gen_tcp) end)
+      ref_left = Process.monitor(left.pid)
+      ref_right = Process.monitor(right.pid)
+      receive do
+        {:DOWN, ^ref_left, :process, _pid, _} -> :ok
+        {:DOWN, ^ref_right, :process, _pid, _} -> :ok
+      end
+      Task.shutdown(left, :brutal_kill)
+      Task.shutdown(right, :brutal_kill)
+      :gen_tcp.close(a)
+      :gen_tcp.close(b)
+      :ok
+    else
+      left = Task.async(fn -> pipe(a, :gen_tcp, b, :gen_tcp) end)
+      right = Task.async(fn -> pipe(b, :gen_tcp, a, :gen_tcp) end)
+      ref_left = Process.monitor(left.pid)
+      ref_right = Process.monitor(right.pid)
+      receive do
+        {:DOWN, ^ref_left, :process, _pid, _} -> :ok
+        {:DOWN, ^ref_right, :process, _pid, _} -> :ok
+      end
+      Task.shutdown(left, :brutal_kill)
+      Task.shutdown(right, :brutal_kill)
+      :gen_tcp.close(a)
+      :gen_tcp.close(b)
+      :ok
     end
-
-    Task.shutdown(left, :brutal_kill)
-    Task.shutdown(right, :brutal_kill)
-    :gen_tcp.close(a)
-    :gen_tcp.close(b)
-    :ok
   end
 
   @doc "Bidirectionally pipe with explicit transport modules."
   @spec pipe_bidirectional(socket(), module(), socket(), module()) :: :ok
   def pipe_bidirectional(a, amod, b, bmod) do
-    left = Task.async(fn -> pipe(a, amod, b, bmod) end)
-    right = Task.async(fn -> pipe(b, bmod, a, amod) end)
-    ref_left = Process.monitor(left.pid)
-    ref_right = Process.monitor(right.pid)
-
-    receive do
-      {:DOWN, ^ref_left, :process, _pid, _} -> :ok
-      {:DOWN, ^ref_right, :process, _pid, _} -> :ok
+    if Application.get_env(:spore, :active_once, false) do
+      left = Task.async(fn -> pipe_active_once(a, amod, b, bmod) end)
+      right = Task.async(fn -> pipe_active_once(b, bmod, a, amod) end)
+      ref_left = Process.monitor(left.pid)
+      ref_right = Process.monitor(right.pid)
+      receive do
+        {:DOWN, ^ref_left, :process, _pid, _} -> :ok
+        {:DOWN, ^ref_right, :process, _pid, _} -> :ok
+      end
+      Task.shutdown(left, :brutal_kill)
+      Task.shutdown(right, :brutal_kill)
+      close(a, amod)
+      close(b, bmod)
+      :ok
+    else
+      left = Task.async(fn -> pipe(a, amod, b, bmod) end)
+      right = Task.async(fn -> pipe(b, bmod, a, amod) end)
+      ref_left = Process.monitor(left.pid)
+      ref_right = Process.monitor(right.pid)
+      receive do
+        {:DOWN, ^ref_left, :process, _pid, _} -> :ok
+        {:DOWN, ^ref_right, :process, _pid, _} -> :ok
+      end
+      Task.shutdown(left, :brutal_kill)
+      Task.shutdown(right, :brutal_kill)
+      close(a, amod)
+      close(b, bmod)
+      :ok
     end
-
-    Task.shutdown(left, :brutal_kill)
-    Task.shutdown(right, :brutal_kill)
-    close(a, amod)
-    close(b, bmod)
-    :ok
   end
 
   defp pipe(src, src_mod, dst, dst_mod) do
-    case src_mod.recv(src, 0) do
+    idle = Application.get_env(:spore, :idle_timeout_ms, 300_000)
+    case src_mod.recv(src, 0, idle) do
       {:ok, data} ->
         _ = dst_mod.send(dst, data)
         Spore.Metrics.track_bytes(byte_size(data))
+        Spore.Tracing.add_event("spore.bytes", %{bytes: byte_size(data)})
         pipe(src, src_mod, dst, dst_mod)
+
+      {:error, :timeout} ->
+        :ok
 
       {:error, _} ->
         :ok
@@ -239,4 +272,18 @@ defmodule Spore.Shared do
 
   defp close(socket, :gen_tcp), do: :gen_tcp.close(socket)
   defp close(socket, :ssl), do: apply(:ssl, :close, [socket])
+
+  defp pipe_active_once(src, src_mod, dst, dst_mod) do
+    _ = apply(src_mod, :setopts, [src, [active: :once]])
+    receive do
+      {tag, ^src, data} when tag in [:tcp, :ssl] ->
+        _ = dst_mod.send(dst, data)
+        Spore.Metrics.track_bytes(byte_size(data))
+        pipe_active_once(src, src_mod, dst, dst_mod)
+      {closed, ^src} when closed in [:tcp_closed, :ssl_closed] -> :ok
+      {err, ^src, _reason} when err in [:tcp_error, :ssl_error] -> :ok
+    after
+      Application.get_env(:spore, :idle_timeout_ms, 300_000) -> :ok
+    end
+  end
 end

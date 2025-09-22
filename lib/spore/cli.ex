@@ -29,7 +29,9 @@ defmodule Spore.CLI do
           certfile: :string,
           keyfile: :string,
           sndbuf: :integer,
-          recbuf: :integer
+          recbuf: :integer,
+          otel_enable: :boolean,
+          otel_endpoint: :string
         ],
         aliases: [p: :port]
       )
@@ -62,6 +64,8 @@ defmodule Spore.CLI do
     if key = Keyword.get(opts, :keyfile), do: Application.put_env(:spore, :client_keyfile, key)
     if sndbuf = Keyword.get(opts, :sndbuf), do: Application.put_env(:spore, :sndbuf, sndbuf)
     if recbuf = Keyword.get(opts, :recbuf), do: Application.put_env(:spore, :recbuf, recbuf)
+    if Keyword.get(opts, :otel_enable), do: Application.put_env(:spore, :otel_enable, true)
+    if ep = Keyword.get(opts, :otel_endpoint), do: Application.put_env(:spore, :otel_endpoint, ep)
 
     case Spore.Client.new(local_host, local_port, to, port, secret) do
       {:ok, client} ->
@@ -94,7 +98,9 @@ defmodule Spore.CLI do
           max_conns_per_ip: :integer,
           metrics_port: :integer,
           sndbuf: :integer,
-          recbuf: :integer
+          recbuf: :integer,
+          otel_enable: :boolean,
+          otel_endpoint: :string
         ]
       )
 
@@ -129,6 +135,8 @@ defmodule Spore.CLI do
     if sndbuf = Keyword.get(opts, :sndbuf), do: Application.put_env(:spore, :sndbuf, sndbuf)
     if recbuf = Keyword.get(opts, :recbuf), do: Application.put_env(:spore, :recbuf, recbuf)
     if mp = Keyword.get(opts, :metrics_port), do: Application.put_env(:spore, :metrics_port, mp)
+    if Keyword.get(opts, :otel_enable), do: Application.put_env(:spore, :otel_enable, true)
+    if ep = Keyword.get(opts, :otel_endpoint), do: Application.put_env(:spore, :otel_endpoint, ep)
 
     case Spore.Server.listen(
            min_port: min_port,
@@ -145,8 +153,8 @@ defmodule Spore.CLI do
   defp usage(io) do
     IO.puts(io, """
     Usage:
-      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET] [--config FILE.json] [--control-port N] [--tls] [--cacertfile PATH] [--certfile PATH] [--keyfile PATH] [--insecure] [--sndbuf N] [--recbuf N]
-      spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--config FILE.json] [--control-port N] [--tls] [--certfile PATH] [--keyfile PATH] [--allow CIDRs] [--deny CIDRs] [--max-conns-per-ip N] [--sndbuf N] [--recbuf N]
+      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET] [--config FILE.json] [--control-port N] [--tls] [--cacertfile PATH] [--certfile PATH] [--keyfile PATH] [--insecure] [--sndbuf N] [--recbuf N] [--otel-enable] [--otel-endpoint URL]
+      spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--config FILE.json] [--control-port N] [--tls] [--certfile PATH] [--keyfile PATH] [--allow CIDRs] [--deny CIDRs] [--max-conns-per-ip N] [--sndbuf N] [--recbuf N] [--metrics-port N] [--otel-enable] [--otel-endpoint URL]
     """)
   end
 

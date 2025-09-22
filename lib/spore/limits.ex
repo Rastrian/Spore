@@ -15,6 +15,10 @@ defmodule Spore.Limits do
     GenServer.cast(__MODULE__, {:close, ip})
   end
 
+  def snapshot do
+    GenServer.call(__MODULE__, :snapshot)
+  end
+
   @impl true
   def handle_call({:can_open, ip}, _from, state) do
     max = Application.get_env(:spore, :max_conns_per_ip, :infinity)
@@ -29,6 +33,11 @@ defmodule Spore.Limits do
 
     state3 = if allow, do: state2, else: state
     {:reply, allow, state3}
+  end
+
+  @impl true
+  def handle_call(:snapshot, _from, state) do
+    {:reply, state, state}
   end
 
   @impl true
