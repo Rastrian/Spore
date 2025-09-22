@@ -9,6 +9,7 @@ defmodule Spore.Application do
       {DynamicSupervisor, name: Spore.Pending.Supervisor, strategy: :one_for_one},
       {Spore.Pending, []},
       {Spore.Limits, []},
+      {Spore.Banlist, []},
       {Spore.Metrics, []}
     ]
 

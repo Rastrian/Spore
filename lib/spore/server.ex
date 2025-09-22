@@ -72,7 +72,7 @@ defmodule Spore.Server do
     {:ok, {ip, _}} = :inet.peername(socket)
     Logger.info("incoming connection from #{:inet.ntoa(ip)}")
 
-    if Spore.ACL.allow?(ip) and Spore.Limits.can_open?(ip) do
+    if Spore.ACL.allow?(ip) and Spore.Banlist.allow?(ip) and Spore.Limits.can_open?(ip) do
       Task.start(fn ->
         try do
           handle_connection(socket, port_range, auth, bind_tunnels)
@@ -102,6 +102,7 @@ defmodule Spore.Server do
 
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
+              if {:ok, {ip, _}} = :inet.peername(socket), do: Spore.Banlist.note_failure(ip)
               :gen_tcp.close(socket)
               exit(:normal)
           end
@@ -113,12 +114,30 @@ defmodule Spore.Server do
 
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
+              if {:ok, {ip, _}} = :inet.peername(socket), do: Spore.Banlist.note_failure(ip)
               :gen_tcp.close(socket)
               exit(:normal)
           end
       end
 
     case Delimited.recv_timeout(d) do
+      {%{"HelloEx" => %{"port" => req_port}}, d2} ->
+        case create_listener(req_port, port_range, bind_tunnels) do
+          {:ok, listener} ->
+            {:ok, {_ip, actual}} = :inet.sockname(listener)
+            Logger.info("new client on port #{actual}")
+
+            {:ok, d3} =
+              Delimited.send(d2, %{
+                "HelloEx" => %{"port" => actual, "version" => "spore/1", "features" => []}
+              })
+
+            hello_loop(d3, listener)
+
+          {:error, message} ->
+            _ = Delimited.send(d2, %{"Error" => message})
+        end
+
       {%{"Hello" => req_port}, d2} ->
         case create_listener(req_port, port_range, bind_tunnels) do
           {:ok, listener} ->
@@ -187,12 +206,26 @@ defmodule Spore.Server do
   defp ssl_server_opts(control_opts) do
     certfile = Application.get_env(:spore, :certfile)
     keyfile = Application.get_env(:spore, :keyfile)
+    cacertfile = Application.get_env(:spore, :cacertfile)
 
-    base = [
-      {:certfile, String.to_charlist(certfile || "")},
-      {:keyfile, String.to_charlist(keyfile || "")},
-      active: false
-    ]
+    base = [active: false]
+
+    base =
+      if is_binary(certfile) and is_binary(keyfile),
+        do: [
+          {:certfile, String.to_charlist(certfile)},
+          {:keyfile, String.to_charlist(keyfile)} | base
+        ],
+        else: base
+
+    base =
+      if is_binary(cacertfile),
+        do: [
+          {:cacertfile, String.to_charlist(cacertfile)},
+          {:verify, :verify_peer},
+          {:fail_if_no_peer_cert, true} | base
+        ],
+        else: base
 
     base ++ control_opts
   end

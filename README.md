@@ -20,6 +20,10 @@ mix escript.build
 ```
 This produces an executable named `spore` in the project directory.
 
+### Optional config file (JSON)
+You can pass a JSON config with `--config FILE.json` on both server and client. Supported keys:
+`control_port`, `tls`, `cacertfile`, `client_certfile`, `client_keyfile`, `certfile`, `keyfile`, `allow`, `deny`, `max_conns_per_ip`, `metrics_port`, `sndbuf`, `recbuf`.
+
 ## Quickstart
 ### Server (choose a public range)
 ```bash

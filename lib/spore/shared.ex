@@ -161,14 +161,28 @@ defmodule Spore.Shared do
 
   defp ssl_client_opts do
     verify =
-      if Application.get_env(:spore, :ssl_verify, false), do: :verify_peer, else: :verify_none
+      if Application.get_env(:spore, :ssl_verify, true), do: :verify_peer, else: :verify_none
 
     base = [active: false, verify: verify]
     cacertfile = Application.get_env(:spore, :cacertfile)
 
-    if is_binary(cacertfile),
-      do: [{:cacertfile, String.to_charlist(cacertfile)} | base],
-      else: base
+    base =
+      if is_binary(cacertfile),
+        do: [{:cacertfile, String.to_charlist(cacertfile)} | base],
+        else: base
+
+    certfile = Application.get_env(:spore, :client_certfile)
+    keyfile = Application.get_env(:spore, :client_keyfile)
+
+    base =
+      if is_binary(certfile) and is_binary(keyfile),
+        do: [
+          {:certfile, String.to_charlist(certfile)},
+          {:keyfile, String.to_charlist(keyfile)} | base
+        ],
+        else: base
+
+    base
   end
 
   @doc "Bidirectionally pipe data between two sockets until either closes."

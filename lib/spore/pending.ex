@@ -14,6 +14,18 @@ defmodule Spore.Pending do
   end
 
   def insert(id, socket, ttl_ms \\ 10_000) do
+    maxp = Application.get_env(:spore, :max_pending, :infinity)
+
+    if maxp != :infinity do
+      %{active: active} = DynamicSupervisor.count_children(Spore.Pending.Supervisor)
+
+      if active >= maxp do
+        :gen_tcp.close(socket)
+        Spore.Metrics.inc(:spore_connections_pending_dropped_total, 1)
+        throw({:error, :too_many_pending})
+      end
+    end
+
     child_spec = %{
       id: {PendingConnection, id},
       start: {PendingConnection, :start_link, [[id: id, socket: socket, ttl_ms: ttl_ms]]},
