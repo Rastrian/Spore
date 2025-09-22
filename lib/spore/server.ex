@@ -72,7 +72,7 @@ defmodule Spore.Server do
     {:ok, {ip, _}} = :inet.peername(socket)
     Logger.info("incoming connection from #{:inet.ntoa(ip)}")
 
-    if Spore.ACL.allow?(ip) and Spore.Limits.can_open?(ip) do
+    if Spore.ACL.allow?(ip) and Spore.Banlist.allow?(ip) and Spore.Limits.can_open?(ip) do
       Task.start(fn ->
         try do
           handle_connection(socket, port_range, auth, bind_tunnels)
@@ -88,6 +88,7 @@ defmodule Spore.Server do
   end
 
   defp handle_connection(socket, port_range, auth, bind_tunnels) do
+    {:ok, {ip, _}} = :inet.peername(socket)
     d = Delimited.new(socket, Shared.transport_mod())
 
     d =
@@ -102,63 +103,97 @@ defmodule Spore.Server do
 
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
+              if {:ok, {ip, _}} = :inet.peername(socket), do: Spore.Banlist.note_failure(ip)
               :gen_tcp.close(socket)
               exit(:normal)
           end
 
         {:many, list} ->
           case Auth.server_handshake_many(list, d) do
-            {:ok, d2} ->
+            {:ok, d2, auth_id} ->
+              if not Spore.SecretQuota.allow?(auth_id) do
+                _ = Delimited.send(d2, %{"Error" => "quota exceeded"})
+                :gen_tcp.close(socket)
+                exit(:normal)
+              end
+
+              Process.put({:spore_auth_id}, auth_id)
               d2
 
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
+              if {:ok, {ip, _}} = :inet.peername(socket), do: Spore.Banlist.note_failure(ip)
               :gen_tcp.close(socket)
               exit(:normal)
           end
       end
 
-    case Delimited.recv_timeout(d) do
-      {%{"Hello" => req_port}, d2} ->
-        case create_listener(req_port, port_range, bind_tunnels) do
-          {:ok, listener} ->
-            {:ok, {_ip, actual}} = :inet.sockname(listener)
-            Logger.info("new client on port #{actual}")
-            {:ok, d3} = Delimited.send(d2, %{"Hello" => actual})
-            hello_loop(d3, listener)
+    Spore.Tracing.with_span(
+      "spore.control_connection",
+      %{"peer.ip" => :inet.ntoa(ip) |> to_string()},
+      fn ->
+        case Delimited.recv_timeout(d) do
+          {%{"HelloEx" => %{"port" => req_port}}, d2} ->
+            case create_listener(req_port, port_range, bind_tunnels) do
+              {:ok, listener} ->
+                {:ok, {_ip, actual}} = :inet.sockname(listener)
+                Logger.info("new client on port #{actual}")
 
-          {:error, message} ->
-            _ = Delimited.send(d2, %{"Error" => message})
+                {:ok, d3} =
+                  Delimited.send(d2, %{
+                    "HelloEx" => %{"port" => actual, "version" => "spore/1", "features" => []}
+                  })
+
+                hello_loop(d3, listener)
+
+              {:error, message} ->
+                _ = Delimited.send(d2, %{"Error" => message})
+            end
+
+          {%{"Hello" => req_port}, d2} ->
+            case create_listener(req_port, port_range, bind_tunnels) do
+              {:ok, listener} ->
+                {:ok, {_ip, actual}} = :inet.sockname(listener)
+                Logger.info("new client on port #{actual}")
+                {:ok, d3} = Delimited.send(d2, %{"Hello" => actual})
+                hello_loop(d3, listener)
+
+              {:error, message} ->
+                _ = Delimited.send(d2, %{"Error" => message})
+            end
+
+          {%{"Accept" => id}, d2} ->
+            case Spore.Pending.take(id) do
+              {:ok, stream2} ->
+                Spore.Metrics.note_accept(id)
+                # Forward traffic bidirectionally between control socket and stored tunnel conn
+                # buffer intentionally unused
+                _ = d2
+                Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
+
+              :error ->
+                Logger.warning("missing connection #{id}")
+            end
+
+          {%{"Authenticate" => _}, _d2} ->
+            Logger.warning("unexpected authenticate")
+            :ok
+
+          {:eof, _} ->
+            :ok
+
+          {{:error, _}, _} ->
+            :ok
+
+          {_, _d2} ->
+            :ok
         end
-
-      {%{"Accept" => id}, d2} ->
-        case Spore.Pending.take(id) do
-          {:ok, stream2} ->
-            Spore.Metrics.note_accept(id)
-            # Forward traffic bidirectionally between control socket and stored tunnel conn
-            # buffer intentionally unused
-            _ = d2
-            Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
-
-          :error ->
-            Logger.warning("missing connection #{id}")
-        end
-
-      {%{"Authenticate" => _}, _d2} ->
-        Logger.warning("unexpected authenticate")
-        :ok
-
-      {:eof, _} ->
-        :ok
-
-      {{:error, _}, _} ->
-        :ok
-
-      {_, _d2} ->
-        :ok
-    end
+      end
+    )
   rescue
-    e -> Logger.warning("connection exited with error: #{inspect(e)}")
+    e ->
+      if auth_id = Process.get({:spore_auth_id}), do: Spore.SecretQuota.dec(auth_id)
+      Logger.warning("connection exited with error: #{inspect(e)}")
   end
 
   defp listen_socket(control_opts) do
@@ -187,12 +222,26 @@ defmodule Spore.Server do
   defp ssl_server_opts(control_opts) do
     certfile = Application.get_env(:spore, :certfile)
     keyfile = Application.get_env(:spore, :keyfile)
+    cacertfile = Application.get_env(:spore, :cacertfile)
 
-    base = [
-      {:certfile, String.to_charlist(certfile || "")},
-      {:keyfile, String.to_charlist(keyfile || "")},
-      active: false
-    ]
+    base = [active: false]
+
+    base =
+      if is_binary(certfile) and is_binary(keyfile),
+        do: [
+          {:certfile, String.to_charlist(certfile)},
+          {:keyfile, String.to_charlist(keyfile)} | base
+        ],
+        else: base
+
+    base =
+      if is_binary(cacertfile),
+        do: [
+          {:cacertfile, String.to_charlist(cacertfile)},
+          {:verify, :verify_peer},
+          {:fail_if_no_peer_cert, true} | base
+        ],
+        else: base
 
     base ++ control_opts
   end

@@ -43,9 +43,36 @@ defmodule Spore.Client do
             end
         end
 
-      {:ok, d} = Delimited.send(d, %{"Hello" => port})
+      # Try extended hello first, fall back to legacy Hello
+      features = []
+
+      features =
+        if Application.get_env(:spore, :tls, false), do: ["tls" | features], else: features
+
+      {:ok, d} =
+        Delimited.send(d, %{
+          "HelloEx" => %{
+            "port" => port,
+            "version" => "spore/1",
+            "features" => Enum.reverse(features)
+          }
+        })
 
       case Delimited.recv_timeout(d) do
+        {%{"HelloEx" => %{"port" => remote_port}}, d_after} ->
+          Logger.info("connected to server (HelloEx)")
+          Logger.info("listening at #{to}:#{remote_port}")
+
+          {:ok,
+           %__MODULE__{
+             to: to,
+             local_host: local_host,
+             local_port: local_port,
+             remote_port: remote_port,
+             auth: auth,
+             conn: d_after
+           }}
+
         {%{"Hello" => remote_port}, d_after} ->
           Logger.info("connected to server")
           Logger.info("listening at #{to}:#{remote_port}")
@@ -73,7 +100,27 @@ defmodule Spore.Client do
           {:error, reason}
 
         _ ->
-          {:error, :unexpected_initial_message}
+          # fallback: send legacy Hello once
+          {:ok, d2} = Delimited.send(d, %{"Hello" => port})
+
+          case Delimited.recv_timeout(d2) do
+            {%{"Hello" => remote_port}, d_after2} ->
+              Logger.info("connected to server (legacy)")
+              Logger.info("listening at #{to}:#{remote_port}")
+
+              {:ok,
+               %__MODULE__{
+                 to: to,
+                 local_host: local_host,
+                 local_port: local_port,
+                 remote_port: remote_port,
+                 auth: auth,
+                 conn: d_after2
+               }}
+
+            other ->
+              {:error, {:unexpected_initial_message, other}}
+          end
       end
     end
   catch

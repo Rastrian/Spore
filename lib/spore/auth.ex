@@ -8,11 +8,13 @@ defmodule Spore.Auth do
 
   import Bitwise
 
-  @type t :: %{key: binary()}
+  @type t :: %{key: binary(), id: String.t()}
 
   @spec new(String.t()) :: t
   def new(secret) do
-    %{key: :crypto.hash(:sha256, secret)}
+    hash = :crypto.hash(:sha256, secret)
+    id = Base.encode16(hash, case: :lower)
+    %{key: hash, id: id}
   end
 
   @doc "Create multiple authenticators from a comma-separated list."
@@ -74,8 +76,10 @@ defmodule Spore.Auth do
 
     case Spore.Shared.Delimited.recv_timeout(d) do
       {%{"Authenticate" => tag}, d2} ->
-        ok = Enum.any?(auths, fn a -> validate(a, challenge, tag) end)
-        if ok, do: {:ok, d2}, else: {{:error, :invalid_secret}, d2}
+        case Enum.find(auths, fn a -> validate(a, challenge, tag) end) do
+          %{id: id} -> {:ok, d2, id}
+          _ -> {{:error, :invalid_secret}, d2}
+        end
 
       {_, d2} ->
         {{:error, :missing_authentication}, d2}

@@ -1,0 +1,12 @@
+{
+  "control_port": 9000,
+  "tls": true,
+  "certfile": "cert.pem",
+  "keyfile": "key.pem",
+  "allow": "10.0.0.0/8,192.168.0.0/16",
+  "deny": "0.0.0.0/0",
+  "max_conns_per_ip": 50,
+  "metrics_port": 9568,
+  "sndbuf": 1048576,
+  "recbuf": 1048576
+}

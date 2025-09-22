@@ -37,10 +37,21 @@ defmodule Spore.Metrics do
         inc(:spore_connections_accepted_total, 1)
         inc(:spore_accept_latency_ms_sum, max(0, now - ts))
         inc(:spore_accept_latency_ms_count, 1)
+        bucket(now - ts)
 
       _ ->
         :ok
     end
+  end
+
+  defp bucket(ms) do
+    for le <- [5, 10, 25, 50, 100, 250, 500, 1000, 2000, 5000] do
+      if ms <= le do
+        inc(String.to_atom("spore_accept_latency_ms_bucket_le_" <> Integer.to_string(le)), 1)
+      end
+    end
+
+    inc(:spore_accept_latency_ms_bucket_le_inf, 1)
   end
 
   def track_bytes(n) when is_integer(n) and n > 0, do: inc(:spore_bytes_proxied_total, n)
@@ -77,12 +88,49 @@ defmodule Spore.Metrics do
   end
 
   defp serve(sock) do
-    _ = :gen_tcp.recv(sock, 0, 100)
-    body = render()
+    with {:ok, req} <- :gen_tcp.recv(sock, 0, 200) do
+      first = req |> to_string() |> String.split("\r\n", parts: 2) |> hd()
 
+      route =
+        cond do
+          String.starts_with?(first, "GET /metrics") ->
+            :metrics
+
+          String.starts_with?(first, "POST /reload") or String.starts_with?(first, "GET /reload") ->
+            :reload
+
+          String.starts_with?(first, "GET /state") ->
+            :state
+
+          true ->
+            :metrics
+        end
+
+      case route do
+        :metrics ->
+          reply_text(sock, render(), "text/plain; version=0.0.4")
+
+        :reload ->
+          case Spore.Config.reload_from_env() do
+            {:ok, _} -> reply_text(sock, "ok\n", "text/plain")
+            {:error, _} -> reply_text(sock, "no-config\n", "text/plain")
+          end
+
+        :state ->
+          body = state_render()
+          reply_text(sock, body, "application/json")
+      end
+    end
+
+    :gen_tcp.close(sock)
+  end
+
+  defp reply_text(sock, body, ctype) do
     resp = [
       "HTTP/1.1 200 OK\r\n",
-      "Content-Type: text/plain; version=0.0.4\r\n",
+      "Content-Type: ",
+      ctype,
+      "\r\n",
       "Content-Length: ",
       Integer.to_string(byte_size(body)),
       "\r\n",
@@ -91,14 +139,50 @@ defmodule Spore.Metrics do
     ]
 
     :gen_tcp.send(sock, resp)
-    :gen_tcp.close(sock)
   end
 
   def render do
     rows = :ets.tab2list(@metrics_table)
+    per_ip = Spore.Limits.snapshot()
+    pending = DynamicSupervisor.count_children(Spore.Pending.Supervisor).active
 
-    Enum.map_join(rows, "\n", fn {name, value} ->
-      ["# TYPE ", Atom.to_string(name), " counter\n", Atom.to_string(name), " ", to_string(value)]
-    end) <> "\n"
+    base =
+      Enum.map(rows, fn {name, value} ->
+        [
+          "# TYPE ",
+          Atom.to_string(name),
+          " counter\n",
+          Atom.to_string(name),
+          " ",
+          to_string(value),
+          "\n"
+        ]
+      end)
+
+    ip_lines =
+      Enum.map(per_ip, fn {ip, count} ->
+        [
+          "spore_conns_by_ip{ip=\"",
+          :inet.ntoa(ip) |> to_string(),
+          "\"} ",
+          Integer.to_string(count),
+          "\n"
+        ]
+      end)
+
+    pending_line = ["spore_pending_active ", Integer.to_string(pending), "\n"]
+    IO.iodata_to_binary(base ++ ip_lines ++ [pending_line])
+  end
+
+  defp state_render do
+    Jason.encode!(%{
+      control_port: Application.get_env(:spore, :control_port),
+      tls: Application.get_env(:spore, :tls),
+      allow: Application.get_env(:spore, :allow),
+      deny: Application.get_env(:spore, :deny),
+      max_conns_per_ip: Application.get_env(:spore, :max_conns_per_ip),
+      max_pending: Application.get_env(:spore, :max_pending),
+      metrics_port: Application.get_env(:spore, :metrics_port)
+    })
   end
 end
