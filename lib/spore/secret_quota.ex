@@ -31,11 +31,13 @@ defmodule Spore.SecretQuota do
 
   @impl true
   def handle_cast({:dec, id}, %{counts: c} = state) do
-    c2 = case Map.get(c, id) do
-      nil -> c
-      1 -> Map.delete(c, id)
-      n when is_integer(n) and n>1 -> Map.put(c, id, n-1)
-    end
+    c2 =
+      case Map.get(c, id) do
+        nil -> c
+        1 -> Map.delete(c, id)
+        n when is_integer(n) and n > 1 -> Map.put(c, id, n - 1)
+      end
+
     {:noreply, %{state | counts: c2}}
   end
 

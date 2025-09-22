@@ -116,6 +116,7 @@ defmodule Spore.Server do
                 :gen_tcp.close(socket)
                 exit(:normal)
               end
+
               Process.put({:spore_auth_id}, auth_id)
               d2
 
@@ -127,64 +128,68 @@ defmodule Spore.Server do
           end
       end
 
-    Spore.Tracing.with_span("spore.control_connection", %{"peer.ip" => :inet.ntoa(ip) |> to_string()}, fn ->
-    case Delimited.recv_timeout(d) do
-      {%{"HelloEx" => %{"port" => req_port}}, d2} ->
-        case create_listener(req_port, port_range, bind_tunnels) do
-          {:ok, listener} ->
-            {:ok, {_ip, actual}} = :inet.sockname(listener)
-            Logger.info("new client on port #{actual}")
+    Spore.Tracing.with_span(
+      "spore.control_connection",
+      %{"peer.ip" => :inet.ntoa(ip) |> to_string()},
+      fn ->
+        case Delimited.recv_timeout(d) do
+          {%{"HelloEx" => %{"port" => req_port}}, d2} ->
+            case create_listener(req_port, port_range, bind_tunnels) do
+              {:ok, listener} ->
+                {:ok, {_ip, actual}} = :inet.sockname(listener)
+                Logger.info("new client on port #{actual}")
 
-            {:ok, d3} =
-              Delimited.send(d2, %{
-                "HelloEx" => %{"port" => actual, "version" => "spore/1", "features" => []}
-              })
+                {:ok, d3} =
+                  Delimited.send(d2, %{
+                    "HelloEx" => %{"port" => actual, "version" => "spore/1", "features" => []}
+                  })
 
-            hello_loop(d3, listener)
+                hello_loop(d3, listener)
 
-          {:error, message} ->
-            _ = Delimited.send(d2, %{"Error" => message})
+              {:error, message} ->
+                _ = Delimited.send(d2, %{"Error" => message})
+            end
+
+          {%{"Hello" => req_port}, d2} ->
+            case create_listener(req_port, port_range, bind_tunnels) do
+              {:ok, listener} ->
+                {:ok, {_ip, actual}} = :inet.sockname(listener)
+                Logger.info("new client on port #{actual}")
+                {:ok, d3} = Delimited.send(d2, %{"Hello" => actual})
+                hello_loop(d3, listener)
+
+              {:error, message} ->
+                _ = Delimited.send(d2, %{"Error" => message})
+            end
+
+          {%{"Accept" => id}, d2} ->
+            case Spore.Pending.take(id) do
+              {:ok, stream2} ->
+                Spore.Metrics.note_accept(id)
+                # Forward traffic bidirectionally between control socket and stored tunnel conn
+                # buffer intentionally unused
+                _ = d2
+                Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
+
+              :error ->
+                Logger.warning("missing connection #{id}")
+            end
+
+          {%{"Authenticate" => _}, _d2} ->
+            Logger.warning("unexpected authenticate")
+            :ok
+
+          {:eof, _} ->
+            :ok
+
+          {{:error, _}, _} ->
+            :ok
+
+          {_, _d2} ->
+            :ok
         end
-
-      {%{"Hello" => req_port}, d2} ->
-        case create_listener(req_port, port_range, bind_tunnels) do
-          {:ok, listener} ->
-            {:ok, {_ip, actual}} = :inet.sockname(listener)
-            Logger.info("new client on port #{actual}")
-            {:ok, d3} = Delimited.send(d2, %{"Hello" => actual})
-            hello_loop(d3, listener)
-
-          {:error, message} ->
-            _ = Delimited.send(d2, %{"Error" => message})
-        end
-
-      {%{"Accept" => id}, d2} ->
-        case Spore.Pending.take(id) do
-          {:ok, stream2} ->
-            Spore.Metrics.note_accept(id)
-            # Forward traffic bidirectionally between control socket and stored tunnel conn
-            # buffer intentionally unused
-            _ = d2
-            Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
-
-          :error ->
-            Logger.warning("missing connection #{id}")
-        end
-
-      {%{"Authenticate" => _}, _d2} ->
-        Logger.warning("unexpected authenticate")
-        :ok
-
-      {:eof, _} ->
-        :ok
-
-      {{:error, _}, _} ->
-        :ok
-
-      {_, _d2} ->
-        :ok
-    end
-    end)
+      end
+    )
   rescue
     e ->
       if auth_id = Process.get({:spore_auth_id}), do: Spore.SecretQuota.dec(auth_id)

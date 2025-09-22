@@ -5,6 +5,7 @@ defmodule Spore.Application do
   @impl true
   def start(_type, _args) do
     _ = Spore.Tracing.start()
+
     children = [
       {Registry, keys: :unique, name: Spore.Pending.Registry},
       {DynamicSupervisor, name: Spore.Pending.Supervisor, strategy: :one_for_one},

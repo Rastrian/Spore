@@ -14,7 +14,8 @@ defmodule Spore.Config do
     put(:max_conns_per_ip, map["max_conns_per_ip"])
     put(:max_pending, map["max_pending"])
     put(:metrics_port, map["metrics_port"])
-    put(:secret_quotas, map["secret_quotas"]) # map of secret_id -> max active
+    # map of secret_id -> max active
+    put(:secret_quotas, map["secret_quotas"])
     put(:sndbuf, map["sndbuf"])
     put(:recbuf, map["recbuf"])
     Spore.SecretQuota.reload_limits()

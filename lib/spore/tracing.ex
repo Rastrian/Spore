@@ -17,10 +17,10 @@ defmodule Spore.Tracing do
 
   def with_span(name, attrs \\ %{}, fun) when is_function(fun, 0) do
     if loaded?() do
-      OpenTelemetry.Tracer.with_span name, fn ->
+      OpenTelemetry.Tracer.with_span(name, fn ->
         set_attrs(attrs)
         fun.()
-      end
+      end)
     else
       fun.()
     end
@@ -43,7 +43,8 @@ defmodule Spore.Tracing do
   end
 
   defp loaded? do
-    Code.ensure_loaded?(OpenTelemetry.Tracer) and function_exported?(OpenTelemetry.Tracer, :with_span, 2)
+    Code.ensure_loaded?(OpenTelemetry.Tracer) and
+      function_exported?(OpenTelemetry.Tracer, :with_span, 2)
   end
 
   defp loaded_exporter? do
