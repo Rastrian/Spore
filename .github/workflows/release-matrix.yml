@@ -12,7 +12,7 @@ jobs:
   build-release:
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-14, windows-2022]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -39,6 +39,7 @@ jobs:
         working-directory: ${{ env.WORKDIR }}
         run: |
           mix local.hex --force
+          mix local.rebar --force
           mix deps.get
 
       - name: Compile (prod)
@@ -49,19 +50,33 @@ jobs:
         working-directory: ${{ env.WORKDIR }}
         run: MIX_ENV=prod mix release
 
-      - name: Archive release (Unix)
+      - name: Verify release path (Unix)
         if: runner.os != 'Windows'
         working-directory: ${{ env.WORKDIR }}
         run: |
-          cd _build/prod/rel
+          ls -la _build/prod/rel
+          test -d _build/prod/rel/spore
+
+      - name: Verify release path (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ env.WORKDIR }}
+        shell: pwsh
+        run: |
+          Get-ChildItem -Path _build/prod/rel
+          If (-Not (Test-Path _build/prod/rel/spore)) { throw "release folder missing" }
+
+      - name: Archive release (Unix)
+        if: runner.os != 'Windows'
+        working-directory: ${{ env.WORKDIR }}/_build/prod/rel
+        run: |
           tar czf spore-${{ runner.os }}.tar.gz spore
 
       - name: Archive release (Windows)
         if: runner.os == 'Windows'
-        working-directory: ${{ env.WORKDIR }}
+        working-directory: ${{ env.WORKDIR }}/_build/prod/rel
+        shell: pwsh
         run: |
-          cd _build/prod/rel
-          powershell -Command "Compress-Archive -Path spore -DestinationPath spore-Windows.zip"
+          Compress-Archive -Path spore -DestinationPath spore-Windows.zip -Force
 
       - name: Upload artifact (Unix)
         if: runner.os != 'Windows'
@@ -78,3 +93,4 @@ jobs:
           name: spore-${{ runner.os }}-release
           path: ${{ env.WORKDIR }}/_build/prod/rel/spore-Windows.zip
           if-no-files-found: error
+

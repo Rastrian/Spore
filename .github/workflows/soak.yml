@@ -1,0 +1,74 @@
+name: Spore Soak
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  soak-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine working directory
+        id: workdir
+        run: |
+          if [ -d bore-erlang ]; then
+            echo "WORKDIR=bore-erlang" >> $GITHUB_ENV
+          else
+            echo "WORKDIR=." >> $GITHUB_ENV
+          fi
+          echo "Using WORKDIR=$WORKDIR"
+
+      - name: Setup Elixir/OTP
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '26'
+          elixir-version: '1.16'
+
+      - name: Install deps and build escript
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          mix deps.get
+          mix escript.build
+
+      - name: Start local HTTP server (backend)
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          nohup python3 -m http.server 25565 >/tmp/http.log 2>&1 &
+          sleep 1
+
+      - name: Start Spore server
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          nohup ./spore server --min-port 20000 --max-port 21000 --bind-addr 127.0.0.1 --metrics-port 9568 >/tmp/server.log 2>&1 &
+          sleep 1
+
+      - name: Start Spore client
+        working-directory: ${{ env.WORKDIR }}
+        run: |
+          nohup ./spore local --local-host 127.0.0.1 --local-port 25565 --to 127.0.0.1 --port 0 >/tmp/client.log 2>&1 &
+          sleep 2
+          echo "Client log:" && tail -n +1 /tmp/client.log
+
+      - name: Discover assigned remote port
+        id: discover
+        run: |
+          PORT=$(grep -oE 'listening at 127.0.0.1:[0-9]+' /tmp/client.log | tail -n1 | sed 's/.*://')
+          if [ -z "$PORT" ]; then echo "Could not find assigned port"; exit 1; fi
+          echo "REMOTE_PORT=$PORT" >> $GITHUB_ENV
+
+      - name: Soak churn (1000 requests, 20 concurrency)
+        run: |
+          seq 1 1000 | xargs -n1 -P20 sh -c 'curl -sSf 127.0.0.1:${REMOTE_PORT}/ >/dev/null' || true
+
+      - name: Check server health metrics
+        run: |
+          curl -s 127.0.0.1:9568/metrics | tail -n +1 | sed -n '1,200p'
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo "=== server.log ==="; cat /tmp/server.log || true
+          echo "=== client.log ==="; cat /tmp/client.log || true
+          echo "=== http.log ==="; cat /tmp/http.log || true

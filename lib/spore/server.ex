@@ -166,10 +166,17 @@ defmodule Spore.Server do
             case Spore.Pending.take(id) do
               {:ok, stream2} ->
                 Spore.Metrics.note_accept(id)
+            if not Spore.Active.allow?() do
+              _ = Delimited.send(d2, %{"Error" => "server busy"})
+              :gen_tcp.close(stream2)
+              :ok
+            else
                 # Forward traffic bidirectionally between control socket and stored tunnel conn
                 # buffer intentionally unused
                 _ = d2
-                Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
+            Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
+            Spore.Active.dec()
+            end
 
               :error ->
                 Logger.warning("missing connection #{id}")

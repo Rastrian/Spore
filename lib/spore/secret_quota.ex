@@ -12,6 +12,7 @@ defmodule Spore.SecretQuota do
   def allow?(id), do: GenServer.call(__MODULE__, {:allow?, id})
   def dec(id), do: GenServer.cast(__MODULE__, {:dec, id})
   def reload_limits(), do: GenServer.cast(__MODULE__, :reload)
+  def snapshot_counts(), do: GenServer.call(__MODULE__, :snapshot)
 
   defp load_limits do
     case Application.get_env(:spore, :secret_quotas) do
@@ -44,5 +45,10 @@ defmodule Spore.SecretQuota do
   @impl true
   def handle_cast(:reload, state) do
     {:noreply, %{state | limits: load_limits()}}
+  end
+
+  @impl true
+  def handle_call(:snapshot, _from, %{counts: c} = state) do
+    {:reply, c, state}
   end
 end

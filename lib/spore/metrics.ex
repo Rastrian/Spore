@@ -145,6 +145,8 @@ defmodule Spore.Metrics do
     rows = :ets.tab2list(@metrics_table)
     per_ip = Spore.Limits.snapshot()
     pending = DynamicSupervisor.count_children(Spore.Pending.Supervisor).active
+    active = Spore.Active.snapshot()
+    per_secret = Spore.SecretQuota.snapshot_counts()
 
     base =
       Enum.map(rows, fn {name, value} ->
@@ -171,7 +173,11 @@ defmodule Spore.Metrics do
       end)
 
     pending_line = ["spore_pending_active ", Integer.to_string(pending), "\n"]
-    IO.iodata_to_binary(base ++ ip_lines ++ [pending_line])
+    active_line = ["spore_active_tunnels ", Integer.to_string(active), "\n"]
+    secret_lines = Enum.map(per_secret, fn {sid, count} ->
+      ["spore_active_by_secret{secret=\"", sid, "\"} ", Integer.to_string(count), "\n"]
+    end)
+    IO.iodata_to_binary(base ++ ip_lines ++ secret_lines ++ [pending_line, active_line])
   end
 
   defp state_render do

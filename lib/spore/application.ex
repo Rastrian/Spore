@@ -5,6 +5,9 @@ defmodule Spore.Application do
   @impl true
   def start(_type, _args) do
     _ = Spore.Tracing.start()
+    if Application.get_env(:spore, :json_logs, false) do
+      Logger.configure_backend(:console, format: {Spore.JsonFormatter, :format})
+    end
 
     children = [
       {Registry, keys: :unique, name: Spore.Pending.Registry},
@@ -13,6 +16,7 @@ defmodule Spore.Application do
       {Spore.Limits, []},
       {Spore.Banlist, []},
       {Spore.SecretQuota, []},
+      {Spore.Active, []},
       {Spore.Metrics, []}
     ]
 
