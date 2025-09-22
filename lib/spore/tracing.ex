@@ -1,5 +1,6 @@
 defmodule Spore.Tracing do
   @moduledoc false
+  require OpenTelemetry.Tracer
 
   def start do
     if Application.get_env(:spore, :otel_enable, false) and loaded_exporter?() do
@@ -17,10 +18,9 @@ defmodule Spore.Tracing do
 
   def with_span(name, attrs \\ %{}, fun) when is_function(fun, 0) do
     if loaded?() do
-      OpenTelemetry.Tracer.with_span(name, fn ->
-        set_attrs(attrs)
+      OpenTelemetry.Tracer.with_span name, attrs do
         fun.()
-      end)
+      end
     else
       fun.()
     end
