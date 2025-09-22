@@ -35,20 +35,48 @@ jobs:
           otp-version: '26'
           elixir-version: '1.16'
 
-      - name: Install deps
+      - name: Install deps (Unix)
+        if: runner.os != 'Windows'
         working-directory: ${{ env.WORKDIR }}
         run: |
           mix local.hex --force
           mix local.rebar --force
           mix deps.get
 
-      - name: Compile (prod)
+      - name: Install deps (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ env.WORKDIR }}
+        shell: pwsh
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+
+      - name: Compile (Unix)
+        if: runner.os != 'Windows'
         working-directory: ${{ env.WORKDIR }}
         run: MIX_ENV=prod mix compile
 
-      - name: Build release
+      - name: Compile (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ env.WORKDIR }}
+        shell: pwsh
+        run: |
+          $env:MIX_ENV='prod'
+          mix compile
+
+      - name: Build release (Unix)
+        if: runner.os != 'Windows'
         working-directory: ${{ env.WORKDIR }}
         run: MIX_ENV=prod mix release
+
+      - name: Build release (Windows)
+        if: runner.os == 'Windows'
+        working-directory: ${{ env.WORKDIR }}
+        shell: pwsh
+        run: |
+          $env:MIX_ENV='prod'
+          mix release
 
       - name: Verify release path (Unix)
         if: runner.os != 'Windows'
