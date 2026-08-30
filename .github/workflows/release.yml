@@ -1,14 +1,13 @@
 name: Spore Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to create (e.g., v0.1.0)'
-        required: true
-        type: string
-      name:
-        description: 'Release name (defaults to tag)'
+        description: 'Tag to create and release (e.g., v0.2.0). Empty skips the release job.'
         required: false
         type: string
       draft:
@@ -26,21 +25,22 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
+  build:
+    name: Build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+          - os: macos-14
+            target: macos-aarch64
+          - os: windows-2022
+            target: windows-x86_64
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Determine working directory
-        id: workdir
-        run: |
-          if [ -d bore-erlang ]; then
-            echo "WORKDIR=bore-erlang" >> $GITHUB_ENV
-          else
-            echo "WORKDIR=." >> $GITHUB_ENV
-          fi
-          echo "Using WORKDIR=$WORKDIR"
 
       - name: Set up Elixir and Erlang/OTP
         uses: erlef/setup-beam@v1
@@ -48,34 +48,87 @@ jobs:
           otp-version: '29.0.5'
           elixir-version: '1.20.4'
 
-      - name: Install deps
-        working-directory: ${{ env.WORKDIR }}
-        run: mix deps.get
-
-      - name: Build escript (prod)
-        working-directory: ${{ env.WORKDIR }}
-        run: MIX_ENV=prod mix escript.build
-
-      - name: Prepare artifact
+      - name: Install deps (Unix)
+        if: runner.os != 'Windows'
         run: |
-          mkdir -p dist
-          cp "$WORKDIR/spore" dist/spore
-          chmod +x dist/spore
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
 
-      - name: Create Git tag
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - name: Install deps (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          git tag "${{ inputs.tag }}"
-          git push origin "${{ inputs.tag }}"
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
 
-      - name: Create GitHub Release (draft)
+      - name: Build release (Unix)
+        if: runner.os != 'Windows'
+        run: MIX_ENV=prod mix release
+
+      - name: Build release (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:MIX_ENV = 'prod'
+          mix release
+
+      - name: Archive release (Unix)
+        if: runner.os != 'Windows'
+        run: tar czf "spore-${{ matrix.target }}.tar.gz" -C _build/prod/rel spore
+
+      - name: Archive release (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path _build/prod/rel/spore -DestinationPath "spore-${{ matrix.target }}.zip" -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spore-${{ matrix.target }}
+          path: spore-${{ matrix.target }}.*
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: >-
+      startsWith(github.ref, 'refs/tags/') ||
+      (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create and push git tag
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        run: |
+          git config user.name "Rastrian"
+          git config user.email "10719452+Rastrian@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ inputs.tag }}"; then
+            echo "Tag ${{ inputs.tag }} already exists on origin, skipping creation"
+          else
+            git tag "${{ inputs.tag }}"
+            git push origin "${{ inputs.tag }}"
+          fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List release files
+        run: ls -la dist
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag }}
-          name: ${{ inputs.name || inputs.tag }}
-          draft: ${{ inputs.draft }}
-          prerelease: ${{ inputs.prerelease }}
-          files: |
-            dist/spore
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          files: dist/*
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
