@@ -9,6 +9,9 @@ defmodule Spore.Tracing do
       exporter_opts = %{protocol: :http_protobuf, endpoint: endpoint, headers: headers}
       _ = :application.ensure_all_started(:opentelemetry)
       _ = :application.ensure_all_started(:opentelemetry_exporter)
+      # The HTTP/protobuf exporter talks to the collector over :inets, which is
+      # not started by default; without it the exporter fails to initialize.
+      {:ok, _} = Application.ensure_all_started(:inets)
       _ = apply(:opentelemetry_exporter, :setup, [[exporter: {:otlp, exporter_opts}]])
       :ok
     else
