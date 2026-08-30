@@ -12,9 +12,21 @@ defmodule Spore.Metrics do
   def init(_) do
     _ = :ets.new(@metrics_table, [:set, :named_table, :public])
     _ = :ets.new(@accept_ts_table, [:set, :named_table, :public])
-    maybe_start_http()
-    {:ok, %{server: nil}}
+    {:ok, start_http(%{http: nil})}
   end
+
+  @doc """
+  Start the HTTP listener when `:metrics_port` is configured, `:ok` otherwise.
+
+  Idempotent: the release boot path calls it from `init/1`, the escript CLI
+  calls it after parsing argv — whichever gets there first owns the listener.
+  """
+  @spec start_http() :: :ok
+  def start_http, do: GenServer.call(__MODULE__, :start_http)
+
+  @impl true
+  def handle_call(:start_http, _from, %{http: nil} = state), do: {:reply, :ok, start_http(state)}
+  def handle_call(:start_http, _from, state), do: {:reply, :ok, state}
 
   def inc(name, delta \\ 1) when is_atom(name) do
     try do
@@ -58,11 +70,16 @@ defmodule Spore.Metrics do
 
   def stale(), do: inc(:spore_connections_stale_total, 1)
 
-  defp maybe_start_http do
+  defp start_http(state) do
     case Application.get_env(:spore, :metrics_port) do
-      nil -> :ok
-      port when is_integer(port) -> Task.start(fn -> run_http(port) end)
+      nil -> state
+      port when is_integer(port) -> %{state | http: start_http_task(port)}
     end
+  end
+
+  defp start_http_task(port) do
+    {:ok, pid} = Task.start(fn -> run_http(port) end)
+    pid
   end
 
   defp run_http(port) do

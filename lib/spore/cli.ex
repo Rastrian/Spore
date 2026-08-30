@@ -2,6 +2,28 @@ defmodule Spore.CLI do
   @moduledoc false
   require Logger
 
+  @server_switches [
+    min_port: :integer,
+    max_port: :integer,
+    secret: :string,
+    bind_addr: :string,
+    bind_tunnels: :string,
+    config: :string,
+    control_port: :integer,
+    tls: :boolean,
+    certfile: :string,
+    keyfile: :string,
+    allow: :string,
+    deny: :string,
+    max_conns_per_ip: :integer,
+    metrics_port: :integer,
+    sndbuf: :integer,
+    recbuf: :integer,
+    otel_enable: :boolean,
+    otel_endpoint: :string,
+    json_logs: :boolean
+  ]
+
   def main(argv) do
     Logger.configure(level: :info)
 
@@ -41,7 +63,7 @@ defmodule Spore.CLI do
     local_host = Keyword.get(opts, :local_host, "localhost")
     to = Keyword.fetch!(opts, :to)
     port = Keyword.get(opts, :port, 0)
-    secret = Keyword.get(opts, :secret, nil)
+    secret = Keyword.get(opts, :secret, nil) || System.get_env("SPORE_SECRET")
     control_port = Keyword.get(opts, :control_port, nil)
 
     if cfg = Keyword.get(opts, :config),
@@ -69,6 +91,8 @@ defmodule Spore.CLI do
     if ep = Keyword.get(opts, :otel_endpoint), do: Application.put_env(:spore, :otel_endpoint, ep)
     if Keyword.get(opts, :json_logs), do: Application.put_env(:spore, :json_logs, true)
 
+    maybe_start_metrics()
+
     case Spore.Client.new(local_host, local_port, to, port, secret) do
       {:ok, client} ->
         case Spore.Client.listen(client) do
@@ -81,35 +105,21 @@ defmodule Spore.CLI do
     end
   end
 
-  defp server(args) do
-    {opts, _, _} =
-      OptionParser.parse(args,
-        switches: [
-          min_port: :integer,
-          max_port: :integer,
-          secret: :string,
-          bind_addr: :string,
-          bind_tunnels: :string,
-          config: :string,
-          control_port: :integer,
-          tls: :boolean,
-          certfile: :string,
-          keyfile: :string,
-          allow: :string,
-          deny: :string,
-          max_conns_per_ip: :integer,
-          metrics_port: :integer,
-          sndbuf: :integer,
-          recbuf: :integer,
-          otel_enable: :boolean,
-          otel_endpoint: :string,
-          json_logs: :boolean
-        ]
-      )
+  @doc """
+  Parse the argv of a `spore server` invocation and apply it to the application
+  environment, returning the opts accepted by `Spore.Server.listen/1`.
+
+  Shared by the escript `server` command and by the release boot path, which
+  receives the same argv through the `SPORE_ARGS` environment variable before
+  the supervision tree starts.
+  """
+  @spec apply_server_opts([String.t()]) :: Spore.Server.opts()
+  def apply_server_opts(args) do
+    {opts, _, _} = OptionParser.parse(args, switches: @server_switches)
 
     min_port = Keyword.get(opts, :min_port, 1024)
     max_port = Keyword.get(opts, :max_port, 65535)
-    secret = Keyword.get(opts, :secret, nil)
+    secret = Keyword.get(opts, :secret, nil) || System.get_env("SPORE_SECRET")
     bind_addr = Keyword.get(opts, :bind_addr, "0.0.0.0")
     bind_tunnels = Keyword.get(opts, :bind_tunnels, nil)
     control_port = Keyword.get(opts, :control_port, nil)
@@ -142,16 +152,28 @@ defmodule Spore.CLI do
     if ep = Keyword.get(opts, :otel_endpoint), do: Application.put_env(:spore, :otel_endpoint, ep)
     if Keyword.get(opts, :json_logs), do: Application.put_env(:spore, :json_logs, true)
 
-    case Spore.Server.listen(
-           min_port: min_port,
-           max_port: max_port,
-           secret: secret,
-           bind_addr: bind_addr,
-           bind_tunnels: bind_tunnels
-         ) do
+    [
+      min_port: min_port,
+      max_port: max_port,
+      secret: secret,
+      bind_addr: bind_addr,
+      bind_tunnels: bind_tunnels
+    ]
+  end
+
+  defp server(args) do
+    server_opts = apply_server_opts(args)
+    maybe_start_metrics()
+
+    case Spore.Server.listen(server_opts) do
       :ok -> :ok
       {:error, err} -> Logger.error("server error: #{inspect(err)}")
     end
+  end
+
+  defp maybe_start_metrics do
+    if Application.get_env(:spore, :metrics_port), do: Spore.Metrics.start_http()
+    :ok
   end
 
   defp usage(io) do
