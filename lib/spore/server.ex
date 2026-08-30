@@ -288,9 +288,25 @@ defmodule Spore.Server do
       {:error, :timeout} ->
         :timer.sleep(@heartbeat_ms)
 
-        case send_heartbeat(d) do
-          {:ok, d2} -> hello_loop(d2, listener)
-          {:error, _} -> close_listener(listener)
+        # Probe the control socket before writing the heartbeat: a half-closed
+        # connection (client sent FIN) still accepts writes, so the heartbeat
+        # alone would keep the ghost listener alive until the OS gave up.
+        case Delimited.recv_timeout(d, 1) do
+          {:eof, _d} ->
+            close_listener(listener)
+
+          {{:error, :closed}, _d} ->
+            close_listener(listener)
+
+          {{:error, _reason}, _d} ->
+            # Real transport error (reset etc.): same treatment.
+            close_listener(listener)
+
+          _ ->
+            case send_heartbeat(d) do
+              {:ok, d2} -> hello_loop(d2, listener)
+              {:error, _} -> close_listener(listener)
+            end
         end
 
       {:error, _} ->

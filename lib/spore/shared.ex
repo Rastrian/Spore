@@ -57,6 +57,11 @@ defmodule Spore.Shared do
       recv(d, Spore.Shared.network_timeout_ms())
     end
 
+    @doc "Receive with an explicit timeout (used as a liveness probe)."
+    @spec recv_timeout(t, non_neg_integer() | :infinity) ::
+            {any() | :eof | {:error, term()}, t}
+    def recv_timeout(%__MODULE__{} = d, timeout), do: recv(d, timeout)
+
     @doc "Send a JSON value followed by a null terminator. Returns updated transport."
     @spec send(t, any()) :: {:ok, t} | {:error, term()}
     def send(%__MODULE__{socket: socket, io_mod: io_mod} = d, value) do
