@@ -5,8 +5,21 @@ defmodule Spore.Application do
   @impl true
   def start(_type, _args) do
     _ = Spore.Tracing.start()
+
     if Application.get_env(:spore, :json_logs, false) do
-      Logger.configure_backend(:console, format: {Spore.JsonFormatter, :format})
+      case :logger.get_handler_config(:default) do
+        {:ok, %{formatter: {Logger.Formatter, formatter}}} ->
+          :logger.update_handler_config(
+            :default,
+            %{
+              formatter:
+                {Logger.Formatter, %{formatter | template: {Spore.JsonFormatter, :format}}}
+            }
+          )
+
+        _ ->
+          :ok
+      end
     end
 
     children = [

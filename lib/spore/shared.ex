@@ -71,7 +71,7 @@ defmodule Spore.Shared do
     defp read_frame(%__MODULE__{socket: socket, io_mod: io_mod, buffer: buf} = d, timeout) do
       case :binary.match(buf, <<0>>) do
         {idx, 1} ->
-          <<frame::binary-size(idx), _zero, rest::binary>> = buf
+          <<frame::binary-size(^idx), _zero, rest::binary>> = buf
           {:ok, frame, %{d | buffer: rest}}
 
         :nomatch ->

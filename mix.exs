@@ -23,9 +23,9 @@ defmodule Spore.MixProject do
     [
       {:jason, "~> 1.4"},
       {:uuid, "~> 1.1"},
-      {:opentelemetry_api, "~> 1.3"},
-      {:opentelemetry, "~> 1.4"},
-      {:opentelemetry_exporter, "~> 1.7"}
+      {:opentelemetry_api, "~> 1.5"},
+      {:opentelemetry, "~> 1.7"},
+      {:opentelemetry_exporter, "~> 1.10"}
     ]
   end
 end

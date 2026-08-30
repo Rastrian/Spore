@@ -103,7 +103,12 @@ defmodule Spore.Server do
 
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
-              if {:ok, {ip, _}} = :inet.peername(socket), do: Spore.Banlist.note_failure(ip)
+
+              case :inet.peername(socket) do
+                {:ok, {ip, _}} -> Spore.Banlist.note_failure(ip)
+                _ -> :ok
+              end
+
               :gen_tcp.close(socket)
               exit(:normal)
           end
@@ -122,7 +127,12 @@ defmodule Spore.Server do
 
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
-              if {:ok, {ip, _}} = :inet.peername(socket), do: Spore.Banlist.note_failure(ip)
+
+              case :inet.peername(socket) do
+                {:ok, {ip, _}} -> Spore.Banlist.note_failure(ip)
+                _ -> :ok
+              end
+
               :gen_tcp.close(socket)
               exit(:normal)
           end
@@ -166,17 +176,18 @@ defmodule Spore.Server do
             case Spore.Pending.take(id) do
               {:ok, stream2} ->
                 Spore.Metrics.note_accept(id)
-            if not Spore.Active.allow?() do
-              _ = Delimited.send(d2, %{"Error" => "server busy"})
-              :gen_tcp.close(stream2)
-              :ok
-            else
-                # Forward traffic bidirectionally between control socket and stored tunnel conn
-                # buffer intentionally unused
-                _ = d2
-            Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
-            Spore.Active.dec()
-            end
+
+                if not Spore.Active.allow?() do
+                  _ = Delimited.send(d2, %{"Error" => "server busy"})
+                  :gen_tcp.close(stream2)
+                  :ok
+                else
+                  # Forward traffic bidirectionally between control socket and stored tunnel conn
+                  # buffer intentionally unused
+                  _ = d2
+                  Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
+                  Spore.Active.dec()
+                end
 
               :error ->
                 Logger.warning("missing connection #{id}")
