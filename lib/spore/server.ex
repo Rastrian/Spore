@@ -271,12 +271,21 @@ defmodule Spore.Server do
         id = Auth.generate_uuid_v4()
         Spore.Pending.insert(id, stream2, 10_000)
         Spore.Metrics.note_pending(id)
-        _ = Delimited.send(d, %{"Connection" => id})
-        hello_loop(send_heartbeat(d), listener)
+
+        with {:ok, d} <- Delimited.send(d, %{"Connection" => id}),
+             {:ok, d} <- send_heartbeat(d) do
+          hello_loop(d, listener)
+        else
+          {:error, _} -> close_listener(listener)
+        end
 
       {:error, :timeout} ->
         :timer.sleep(@heartbeat_ms)
-        hello_loop(send_heartbeat(d), listener)
+
+        case send_heartbeat(d) do
+          {:ok, d2} -> hello_loop(d2, listener)
+          {:error, _} -> close_listener(listener)
+        end
 
       {:error, _} ->
         :ok
@@ -284,10 +293,15 @@ defmodule Spore.Server do
   end
 
   defp send_heartbeat(d) do
-    case Delimited.send(d, "Heartbeat") do
-      {:ok, d2} -> d2
-      _ -> d
-    end
+    Delimited.send(d, "Heartbeat")
+  end
+
+  # The client control connection is gone: release the tunnel port so it does
+  # not stay bound by a dead session.
+  defp close_listener(listener) do
+    Logger.info("client control connection lost; closing tunnel listener")
+    :gen_tcp.close(listener)
+    :ok
   end
 
   defp create_listener(port, range, bind_ip) do
