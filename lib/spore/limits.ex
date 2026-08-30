@@ -42,12 +42,14 @@ defmodule Spore.Limits do
 
   @impl true
   def handle_cast({:close, ip}, state) do
+    # Map.delete (not update_in -> nil): storing a nil value would crash
+    # metrics rendering and poison later lookups for that IP.
     state2 =
-      update_in(state[ip], fn
-        nil -> nil
-        1 -> nil
-        n when is_integer(n) and n > 1 -> n - 1
-      end)
+      case Map.get(state, ip) do
+        nil -> state
+        1 -> Map.delete(state, ip)
+        n when is_integer(n) and n > 1 -> Map.put(state, ip, n - 1)
+      end
 
     {:noreply, state2}
   end
