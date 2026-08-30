@@ -24,6 +24,26 @@ defmodule Spore.CLI do
     json_logs: :boolean
   ]
 
+  @local_switches [
+    local_port: :integer,
+    local_host: :string,
+    to: :string,
+    port: :integer,
+    secret: :string,
+    config: :string,
+    control_port: :integer,
+    tls: :boolean,
+    cacertfile: :string,
+    insecure: :boolean,
+    certfile: :string,
+    keyfile: :string,
+    sndbuf: :integer,
+    recbuf: :integer,
+    otel_enable: :boolean,
+    otel_endpoint: :string,
+    json_logs: :boolean
+  ]
+
   def main(argv) do
     Logger.configure(level: :info)
 
@@ -35,31 +55,48 @@ defmodule Spore.CLI do
   end
 
   defp local(args) do
-    {opts, _, _} =
-      OptionParser.parse(args,
-        switches: [
-          local_port: :integer,
-          local_host: :string,
-          to: :string,
-          port: :integer,
-          secret: :string,
-          config: :string,
-          control_port: :integer,
-          tls: :boolean,
-          cacertfile: :string,
-          insecure: :boolean,
-          certfile: :string,
-          keyfile: :string,
-          sndbuf: :integer,
-          recbuf: :integer,
-          otel_enable: :boolean,
-          otel_endpoint: :string,
-          json_logs: :boolean
-        ],
-        aliases: [p: :port]
-      )
+    client_opts = apply_local_opts(args)
 
-    local_port = Keyword.fetch!(opts, :local_port)
+    case Spore.Client.new(
+           client_opts.local_host,
+           client_opts.local_port,
+           client_opts.to,
+           client_opts.port,
+           client_opts.secret
+         ) do
+      {:ok, client} ->
+        case Spore.Client.listen(client) do
+          :ok -> :ok
+          {:error, err} -> Logger.error("client exited: #{inspect(err)}")
+        end
+
+      {:error, err} ->
+        Logger.error("failed to start client: #{inspect(err)}")
+    end
+  end
+
+  @doc """
+  Parse the argv of a `spore local` invocation (without the leading "local"),
+  apply it to the application environment and return the connection opts for
+  `Spore.Client.new/5`. Like the Rust original, the local port may be passed
+  positionally (`local 9573 --to HOST`) or through `--local-port`, which wins.
+
+  Shared by the escript `local` command and by the release boot path, which
+  receives the same argv through the `SPORE_ARGS` environment variable before
+  the supervision tree starts.
+  """
+  @spec apply_local_opts([String.t()]) :: %{
+          local_host: String.t(),
+          local_port: non_neg_integer(),
+          to: String.t(),
+          port: non_neg_integer(),
+          secret: String.t() | nil
+        }
+  def apply_local_opts(args) do
+    {opts, positional, _} =
+      OptionParser.parse(args, switches: @local_switches, aliases: [p: :port])
+
+    local_port = Keyword.get(opts, :local_port) || positional_port(positional)
     local_host = Keyword.get(opts, :local_host, "localhost")
     to = Keyword.fetch!(opts, :to)
     port = Keyword.get(opts, :port, 0)
@@ -93,16 +130,13 @@ defmodule Spore.CLI do
 
     maybe_start_metrics()
 
-    case Spore.Client.new(local_host, local_port, to, port, secret) do
-      {:ok, client} ->
-        case Spore.Client.listen(client) do
-          :ok -> :ok
-          {:error, err} -> Logger.error("client exited: #{inspect(err)}")
-        end
-
-      {:error, err} ->
-        Logger.error("failed to start client: #{inspect(err)}")
-    end
+    %{
+      local_host: local_host,
+      local_port: local_port,
+      to: to,
+      port: port,
+      secret: secret
+    }
   end
 
   @doc """
@@ -172,14 +206,24 @@ defmodule Spore.CLI do
   end
 
   defp maybe_start_metrics do
-    if Application.get_env(:spore, :metrics_port), do: Spore.Metrics.start_http()
+    # The release boot path parses argv before the supervision tree exists;
+    # there the Spore.Metrics child starts the listener itself, so only call
+    # into it when the server is already up (escript path).
+    if Application.get_env(:spore, :metrics_port) && Process.whereis(Spore.Metrics),
+      do: Spore.Metrics.start_http()
+
     :ok
   end
+
+  defp positional_port([port | _]), do: String.to_integer(port)
+
+  defp positional_port([]),
+    do: raise(ArgumentError, "missing local port, pass it positionally or via --local-port")
 
   defp usage(io) do
     IO.puts(io, """
     Usage:
-      spore local --local-port <PORT> --to <HOST> [--local-host HOST] [--port PORT] [--secret SECRET] [--config FILE.json] [--control-port N] [--tls] [--cacertfile PATH] [--certfile PATH] [--keyfile PATH] [--insecure] [--sndbuf N] [--recbuf N] [--otel-enable] [--otel-endpoint URL] [--json-logs]
+      spore local [PORT] --to <HOST> [--local-port <PORT>] [--local-host HOST] [--port PORT] [--secret SECRET] [--config FILE.json] [--control-port N] [--tls] [--cacertfile PATH] [--certfile PATH] [--keyfile PATH] [--insecure] [--sndbuf N] [--recbuf N] [--otel-enable] [--otel-endpoint URL] [--json-logs]
       spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--config FILE.json] [--control-port N] [--tls] [--certfile PATH] [--keyfile PATH] [--allow CIDRs] [--deny CIDRs] [--max-conns-per-ip N] [--sndbuf N] [--recbuf N] [--metrics-port N] [--otel-enable] [--otel-endpoint URL] [--json-logs]
     """)
   end

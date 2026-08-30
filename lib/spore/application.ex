@@ -8,7 +8,7 @@ defmodule Spore.Application do
     # SPORE_ARGS is applied before any child starts so that flags such as
     # --metrics-port or --otel-enable are already in the application env when
     # the corresponding child boots.
-    server_opts = parse_spore_args()
+    spore_opts = parse_spore_args()
 
     _ = Spore.Tracing.start()
 
@@ -38,15 +38,17 @@ defmodule Spore.Application do
         {Spore.SecretQuota, []},
         {Spore.Active, []},
         {Spore.Metrics, []}
-      ] ++ release_children(server_opts)
+      ] ++ release_children(spore_opts)
 
     opts = [strategy: :one_for_one, name: Spore.Supervisor]
     Supervisor.start_link(children, opts)
   end
 
-  # Turn SPORE_ARGS into a child for the release boot path. Unset or non-server
-  # values leave the tree untouched so the plain `bin/spore` daemon still boots.
+  # Turn SPORE_ARGS into a child for the release boot path. Unset or
+  # unrecognized values leave the tree untouched so the plain `bin/spore`
+  # daemon still boots.
   defp release_children({:server, server_opts}), do: [{Spore.ReleaseServer, server_opts}]
+  defp release_children({:local, local_opts}), do: [{Spore.ReleaseClient, local_opts}]
   defp release_children(nil), do: []
 
   defp parse_spore_args do
@@ -59,9 +61,13 @@ defmodule Spore.Application do
           ["server" | rest] ->
             {:server, Spore.CLI.apply_server_opts(rest)}
 
+          ["local" | rest] ->
+            {:local, Spore.CLI.apply_local_opts(rest)}
+
           other ->
             Logger.warning(
-              "ignoring SPORE_ARGS, only \"server ...\" is supported: #{inspect(other)}"
+              "ignoring SPORE_ARGS, only \"server ...\" or \"local ...\" is supported: " <>
+                inspect(other)
             )
 
             nil
