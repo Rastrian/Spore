@@ -43,49 +43,58 @@ defmodule Spore.Client do
             end
         end
 
-      # Try extended hello first, fall back to legacy Hello
-      features = []
+      # The Rust bore server decodes ClientMessage as a closed serde enum and
+      # drops the connection on an unrecognized variant such as HelloEx, so the
+      # legacy Hello must go first; the extended hello is only attempted when
+      # the server clearly could not decode the legacy frame.
+      case hello(d, port, false) do
+        {:ok, remote_port, d2} ->
+          Logger.info("listening at #{to}:#{remote_port}")
 
-      features =
-        if Application.get_env(:spore, :tls, false), do: ["tls" | features], else: features
+          {:ok,
+           %__MODULE__{
+             to: to,
+             local_host: local_host,
+             local_port: local_port,
+             remote_port: remote_port,
+             auth: auth,
+             conn: d2
+           }}
 
-      {:ok, d} =
-        Delimited.send(d, %{
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  catch
+    {:error, reason} -> {:error, reason}
+  end
+
+  # Exchange one hello variant and map the server's reply. `extended?` selects
+  # the outgoing frame and bounds the retry: a frame the server fails to decode
+  # (or an unrecognized reply) gets exactly one retry with the extended hello.
+  # Transport errors and :eof are terminal because the connection is gone.
+  defp hello(d, port, extended?) do
+    message =
+      if extended?,
+        do: %{
           "HelloEx" => %{
             "port" => port,
             "version" => "spore/1",
-            "features" => Enum.reverse(features)
+            "features" => hello_ex_features()
           }
-        })
+        },
+        else: %{"Hello" => port}
 
-      case Delimited.recv_timeout(d) do
+    with {:ok, d2} <- Delimited.send(d, message) do
+      case Delimited.recv_timeout(d2) do
+        {%{"Hello" => remote_port}, d_after} ->
+          Logger.info("connected to server (legacy Hello)")
+          {:ok, remote_port, d_after}
+
         {%{"HelloEx" => %{"port" => remote_port}}, d_after} ->
           Logger.info("connected to server (HelloEx)")
-          Logger.info("listening at #{to}:#{remote_port}")
-
-          {:ok,
-           %__MODULE__{
-             to: to,
-             local_host: local_host,
-             local_port: local_port,
-             remote_port: remote_port,
-             auth: auth,
-             conn: d_after
-           }}
-
-        {%{"Hello" => remote_port}, d_after} ->
-          Logger.info("connected to server")
-          Logger.info("listening at #{to}:#{remote_port}")
-
-          {:ok,
-           %__MODULE__{
-             to: to,
-             local_host: local_host,
-             local_port: local_port,
-             remote_port: remote_port,
-             auth: auth,
-             conn: d_after
-           }}
+          Logger.info("server is a Spore server")
+          {:ok, remote_port, d_after}
 
         {%{"Error" => message}, _} ->
           {:error, {:server_error, message}}
@@ -96,35 +105,23 @@ defmodule Spore.Client do
         {:eof, _} ->
           {:error, :eof}
 
+        {{:error, {:decode_error, _} = reason}, d_after} ->
+          retry(d_after, port, extended?, reason)
+
         {{:error, reason}, _} ->
           {:error, reason}
 
-        _ ->
-          # fallback: send legacy Hello once
-          {:ok, d2} = Delimited.send(d, %{"Hello" => port})
-
-          case Delimited.recv_timeout(d2) do
-            {%{"Hello" => remote_port}, d_after2} ->
-              Logger.info("connected to server (legacy)")
-              Logger.info("listening at #{to}:#{remote_port}")
-
-              {:ok,
-               %__MODULE__{
-                 to: to,
-                 local_host: local_host,
-                 local_port: local_port,
-                 remote_port: remote_port,
-                 auth: auth,
-                 conn: d_after2
-               }}
-
-            other ->
-              {:error, {:unexpected_initial_message, other}}
-          end
+        {other, d_after} ->
+          retry(d_after, port, extended?, {:unexpected_initial_message, other})
       end
     end
-  catch
-    {:error, reason} -> {:error, reason}
+  end
+
+  defp retry(_d, _port, true, reason), do: {:error, reason}
+  defp retry(d, port, false, _reason), do: hello(d, port, true)
+
+  defp hello_ex_features do
+    if Application.get_env(:spore, :tls, false), do: ["tls"], else: []
   end
 
   @doc "Return the publicly available remote port."
