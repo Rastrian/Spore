@@ -31,6 +31,11 @@ defmodule Spore.SecretQuota do
   end
 
   @impl true
+  def handle_call(:snapshot, _from, %{counts: c} = state) do
+    {:reply, c, state}
+  end
+
+  @impl true
   def handle_cast({:dec, id}, %{counts: c} = state) do
     c2 =
       case Map.get(c, id) do
@@ -45,10 +50,5 @@ defmodule Spore.SecretQuota do
   @impl true
   def handle_cast(:reload, state) do
     {:noreply, %{state | limits: load_limits()}}
-  end
-
-  @impl true
-  def handle_call(:snapshot, _from, %{counts: c} = state) do
-    {:reply, c, state}
   end
 end

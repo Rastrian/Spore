@@ -28,12 +28,12 @@ defmodule Spore.Active do
   end
 
   @impl true
-  def handle_cast(:dec, count) do
-    {:noreply, if(count > 0, do: count - 1, else: 0)}
+  def handle_call(:snapshot, _from, count) do
+    {:reply, count, count}
   end
 
   @impl true
-  def handle_call(:snapshot, _from, count) do
-    {:reply, count, count}
+  def handle_cast(:dec, count) do
+    {:noreply, if(count > 0, do: count - 1, else: 0)}
   end
 end

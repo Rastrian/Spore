@@ -174,9 +174,12 @@ defmodule Spore.Metrics do
 
     pending_line = ["spore_pending_active ", Integer.to_string(pending), "\n"]
     active_line = ["spore_active_tunnels ", Integer.to_string(active), "\n"]
-    secret_lines = Enum.map(per_secret, fn {sid, count} ->
-      ["spore_active_by_secret{secret=\"", sid, "\"} ", Integer.to_string(count), "\n"]
-    end)
+
+    secret_lines =
+      Enum.map(per_secret, fn {sid, count} ->
+        ["spore_active_by_secret{secret=\"", sid, "\"} ", Integer.to_string(count), "\n"]
+      end)
+
     IO.iodata_to_binary(base ++ ip_lines ++ secret_lines ++ [pending_line, active_line])
   end
 
