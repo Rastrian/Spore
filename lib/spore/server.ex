@@ -91,15 +91,17 @@ defmodule Spore.Server do
     {:ok, {ip, _}} = :inet.peername(socket)
     d = Delimited.new(socket, Shared.transport_mod())
 
-    d =
+    # Resolve the handshake into {d, quota_id}: the auth id is tracked only on
+    # the multi-secret path, where the quota counter was already incremented.
+    {d, quota_id} =
       case auth do
         nil ->
-          d
+          {d, nil}
 
         %{} = a ->
           case Auth.server_handshake(a, d) do
             {:ok, d2} ->
-              d2
+              {d2, nil}
 
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
@@ -122,8 +124,7 @@ defmodule Spore.Server do
                 exit(:normal)
               end
 
-              Process.put({:spore_auth_id}, auth_id)
-              d2
+              {d2, auth_id}
 
             {{:error, reason}, d2} ->
               _ = Delimited.send(d2, %{"Error" => to_string(reason)})
@@ -138,79 +139,84 @@ defmodule Spore.Server do
           end
       end
 
-    Spore.Tracing.with_span(
-      "spore.control_connection",
-      %{"peer.ip" => :inet.ntoa(ip) |> to_string()},
-      fn ->
-        case Delimited.recv_timeout(d) do
-          {%{"HelloEx" => %{"port" => req_port}}, d2} ->
-            case create_listener(req_port, port_range, bind_tunnels) do
-              {:ok, listener} ->
-                {:ok, {_ip, actual}} = :inet.sockname(listener)
-                Logger.info("new client on port #{actual}")
+    # `after` runs on normal return, raise and exit alike, so the quota slot
+    # taken above is released on every session ending.
+    try do
+      Spore.Tracing.with_span(
+        "spore.control_connection",
+        %{"peer.ip" => :inet.ntoa(ip) |> to_string()},
+        fn ->
+          case Delimited.recv_timeout(d) do
+            {%{"HelloEx" => %{"port" => req_port}}, d2} ->
+              case create_listener(req_port, port_range, bind_tunnels) do
+                {:ok, listener} ->
+                  {:ok, {_ip, actual}} = :inet.sockname(listener)
+                  Logger.info("new client on port #{actual}")
 
-                {:ok, d3} =
-                  Delimited.send(d2, %{
-                    "HelloEx" => %{"port" => actual, "version" => "spore/1", "features" => []}
-                  })
+                  {:ok, d3} =
+                    Delimited.send(d2, %{
+                      "HelloEx" => %{"port" => actual, "version" => "spore/1", "features" => []}
+                    })
 
-                hello_loop(d3, listener)
+                  hello_loop(d3, listener)
 
-              {:error, message} ->
-                _ = Delimited.send(d2, %{"Error" => message})
-            end
+                {:error, message} ->
+                  _ = Delimited.send(d2, %{"Error" => message})
+              end
 
-          {%{"Hello" => req_port}, d2} ->
-            case create_listener(req_port, port_range, bind_tunnels) do
-              {:ok, listener} ->
-                {:ok, {_ip, actual}} = :inet.sockname(listener)
-                Logger.info("new client on port #{actual}")
-                {:ok, d3} = Delimited.send(d2, %{"Hello" => actual})
-                hello_loop(d3, listener)
+            {%{"Hello" => req_port}, d2} ->
+              case create_listener(req_port, port_range, bind_tunnels) do
+                {:ok, listener} ->
+                  {:ok, {_ip, actual}} = :inet.sockname(listener)
+                  Logger.info("new client on port #{actual}")
+                  {:ok, d3} = Delimited.send(d2, %{"Hello" => actual})
+                  hello_loop(d3, listener)
 
-              {:error, message} ->
-                _ = Delimited.send(d2, %{"Error" => message})
-            end
+                {:error, message} ->
+                  _ = Delimited.send(d2, %{"Error" => message})
+              end
 
-          {%{"Accept" => id}, d2} ->
-            case Spore.Pending.take(id) do
-              {:ok, stream2} ->
-                Spore.Metrics.note_accept(id)
+            {%{"Accept" => id}, d2} ->
+              case Spore.Pending.take(id) do
+                {:ok, stream2} ->
+                  Spore.Metrics.note_accept(id)
 
-                if not Spore.Active.allow?() do
-                  _ = Delimited.send(d2, %{"Error" => "server busy"})
-                  :gen_tcp.close(stream2)
-                  :ok
-                else
-                  # Forward traffic bidirectionally between control socket and stored tunnel conn
-                  # buffer intentionally unused
-                  _ = d2
-                  Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
-                  Spore.Active.dec()
-                end
+                  if not Spore.Active.allow?() do
+                    _ = Delimited.send(d2, %{"Error" => "server busy"})
+                    :gen_tcp.close(stream2)
+                    :ok
+                  else
+                    # Forward traffic bidirectionally between control socket and stored tunnel conn
+                    # buffer intentionally unused
+                    _ = d2
+                    Shared.pipe_bidirectional(socket, Shared.transport_mod(), stream2, :gen_tcp)
+                    Spore.Active.dec()
+                  end
 
-              :error ->
-                Logger.warning("missing connection #{id}")
-            end
+                :error ->
+                  Logger.warning("missing connection #{id}")
+              end
 
-          {%{"Authenticate" => _}, _d2} ->
-            Logger.warning("unexpected authenticate")
-            :ok
+            {%{"Authenticate" => _}, _d2} ->
+              Logger.warning("unexpected authenticate")
+              :ok
 
-          {:eof, _} ->
-            :ok
+            {:eof, _} ->
+              :ok
 
-          {{:error, _}, _} ->
-            :ok
+            {{:error, _}, _} ->
+              :ok
 
-          {_, _d2} ->
-            :ok
+            {_, _d2} ->
+              :ok
+          end
         end
-      end
-    )
+      )
+    after
+      if quota_id, do: Spore.SecretQuota.dec(quota_id)
+    end
   rescue
     e ->
-      if auth_id = Process.get({:spore_auth_id}), do: Spore.SecretQuota.dec(auth_id)
       Logger.warning("connection exited with error: #{inspect(e)}")
   end
 
