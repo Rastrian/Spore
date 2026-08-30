@@ -298,8 +298,10 @@ defmodule Spore.Server do
           {{:error, :closed}, _d} ->
             close_listener(listener)
 
-          {{:error, _reason}, _d} ->
-            # Real transport error (reset etc.): same treatment.
+          {{:error, reason}, _d} when reason != :timeout ->
+            # Real transport error (reset etc.): same treatment. NOTE: a read
+            # timeout (:timeout) is HEALTHY here — the client never speaks on
+            # the control plane, silence is expected.
             close_listener(listener)
 
           _ ->
