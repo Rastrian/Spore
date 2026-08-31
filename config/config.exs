@@ -10,3 +10,7 @@ spore_control_port =
   end
 
 config :spore, control_port: spore_control_port
+
+# Baked at compile time so `spore update` (and any runtime code) can report
+# the version the binary was built from without touching mix tooling.
+config :spore, version: "0.2.7"

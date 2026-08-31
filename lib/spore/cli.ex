@@ -50,9 +50,33 @@ defmodule Spore.CLI do
     Logger.configure(level: :info)
 
     case argv do
-      ["local" | rest] -> local(rest)
-      ["server" | rest] -> server(rest)
-      _ -> usage(:stderr)
+      ["update" | rest] ->
+        # In the mix release daemon `bin/spore` needs a release command, so
+        # `spore update` reaches this through `bin/spore eval` (see
+        # Spore.SelfUpdate's moduledoc). The eval node has no supervision
+        # tree, hence no baked config (e.g. :spore, :version) and no Logger
+        # handlers: start the application ourselves first.
+        System.delete_env("SPORE_ARGS")
+
+        case Application.ensure_all_started(:spore) do
+          {:ok, _apps} ->
+            case Spore.SelfUpdate.run(rest) do
+              :ok -> :ok
+              {:error, err} -> Logger.error("update failed: #{inspect(err)}")
+            end
+
+          {:error, reason} ->
+            Logger.error("update failed: could not start spore: #{inspect(reason)}")
+        end
+
+      ["local" | rest] ->
+        local(rest)
+
+      ["server" | rest] ->
+        server(rest)
+
+      _ ->
+        usage(:stderr)
     end
   end
 
@@ -235,6 +259,7 @@ defmodule Spore.CLI do
     Usage:
       spore local [PORT] --to <HOST> [--local-port <PORT>] [--local-host HOST] [--port PORT] [--secret SECRET] [--config FILE.json] [--control-port N] [--tls] [--cacertfile PATH] [--certfile PATH] [--keyfile PATH] [--insecure] [--sndbuf N] [--recbuf N] [--retry] [--retry-delay-ms N] [--otel-enable] [--otel-endpoint URL] [--json-logs]
       spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--config FILE.json] [--control-port N] [--tls] [--certfile PATH] [--keyfile PATH] [--allow CIDRs] [--deny CIDRs] [--max-conns-per-ip N] [--sndbuf N] [--recbuf N] [--metrics-port N] [--otel-enable] [--otel-endpoint URL] [--json-logs]
+      spore update [--check] [--version vX.Y.Z] [--repo OWNER/REPO] [--restart] [--install-root DIR]
     """)
   end
 
