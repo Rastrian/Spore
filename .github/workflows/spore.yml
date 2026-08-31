@@ -51,6 +51,10 @@ jobs:
         working-directory: ${{ env.WORKDIR }}
         run: mix compile --warnings-as-errors
 
+      - name: Run unit tests
+        working-directory: ${{ env.WORKDIR }}
+        run: mix test
+
       - name: Build escript
         working-directory: ${{ env.WORKDIR }}
         run: mix escript.build
