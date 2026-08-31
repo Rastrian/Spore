@@ -8,7 +8,11 @@ defmodule Spore.MixProject do
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      escript: [main_module: Spore.CLI]
+      escript: [main_module: Spore.CLI],
+      # The app's singletons (Limits, Banlist, SecretQuota, ...) are registered
+      # names; tests start fresh instances per test via start_supervised!, so
+      # the real application must NOT be booted by the test runner.
+      aliases: [test: "test --no-start"]
     ]
   end
 
