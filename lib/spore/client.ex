@@ -10,6 +10,10 @@ defmodule Spore.Client do
 
   @default_retry_delay_ms 5_000
   @max_retry_delay_ms 60_000
+  # The server heartbeats every 500ms (see hello_loop/2 in Spore.Server), so
+  # the default tolerates ten missed heartbeats before a control connection
+  # is presumed dead.
+  @default_heartbeat_timeout_ms 5_000
 
   defstruct [:to, :local_host, :local_port, :remote_port, :auth, :conn]
 
@@ -135,6 +139,13 @@ defmodule Spore.Client do
   `retry_delay_ms`) the loop reconnects automatically instead of returning:
   connection loss and failed (re)connects back off exponentially from
   `retry_delay_ms` up to `max_retry_delay_ms`, indefinitely.
+
+  Reads are bounded by `heartbeat_timeout_ms` (default
+  `#{@default_heartbeat_timeout_ms}ms`): the server heartbeats every 500ms, so
+  a control connection that stops delivering them — dead without a FIN/RST
+  ever reaching us, e.g. after a NAT/conntrack flush — is declared lost and
+  reconnects (or returns `{:error, :heartbeat_timeout}` without retry)
+  instead of blocking forever.
   """
   @spec listen(t) :: :ok | {:error, term()}
   def listen(%__MODULE__{conn: d} = state) when not is_nil(d) do
@@ -157,10 +168,25 @@ defmodule Spore.Client do
     end
   end
 
+  # How long a read on the control connection may block before the connection
+  # is presumed dead. Well above the server's 500ms heartbeat cadence, and
+  # low enough that a zombie connection is dropped in seconds, not hours.
+  defp heartbeat_timeout_ms do
+    case Application.get_env(:spore, :heartbeat_timeout_ms) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> @default_heartbeat_timeout_ms
+    end
+  end
+
+  defp close_conn(%Delimited{socket: socket, io_mod: io_mod}), do: io_mod.close(socket)
+
   # Control loop. `retry?` and `delay` are carried in the tail calls; `delay`
   # is the next backoff value and resets on every successful (re)connection.
+  # Reads are bounded by the heartbeat timeout: without it, a connection that
+  # died without delivering a FIN/RST (NAT/conntrack flush, silent host loss)
+  # blocks recv forever and `--retry` never gets a chance to fire.
   defp loop(d, state, retry?, delay) do
-    case Delimited.recv(d) do
+    case Delimited.recv(d, heartbeat_timeout_ms()) do
       {"Heartbeat", d2} ->
         loop(d2, state, retry?, delay)
 
@@ -181,6 +207,19 @@ defmodule Spore.Client do
 
       {:eof, _} ->
         if retry?, do: reconnect(state, retry?, delay), else: :ok
+
+      {{:error, :timeout}, d} ->
+        # The socket looks healthy but the server has been silent for far
+        # longer than its heartbeat interval: treat it as gone, exactly like
+        # an error, closing it ourselves since no FIN is coming.
+        Logger.warning(
+          "spore client: no heartbeat within #{heartbeat_timeout_ms()}ms; " <>
+            "control connection presumed dead"
+        )
+
+        close_conn(d)
+
+        if retry?, do: reconnect(state, retry?, delay), else: {:error, :heartbeat_timeout}
 
       {{:error, _}, _} ->
         if retry?, do: reconnect(state, retry?, delay), else: :ok
