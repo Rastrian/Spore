@@ -3,6 +3,9 @@ name: Spore E2E
 on:
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   e2e-linux:
     runs-on: ubuntu-latest
