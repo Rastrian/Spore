@@ -115,5 +115,58 @@ defmodule Spore.ACLTest do
       assert ACL.allow?({0, 0, 0, 0, 0, 0, 0, 1})
       refute ACL.allow?({0, 0, 0, 0, 0, 0, 0, 2})
     end
+
+    test "IPv6 CIDR rules match correctly" do
+      Application.put_env(:spore, :allow, ACL.parse_list("2001:db8::/32"))
+
+      assert ACL.allow?({0x2001, 0xDB8, 0, 0, 0, 0, 0, 1})
+      refute ACL.allow?({0x2001, 0xDB9, 0, 0, 0, 0, 0, 1})
+    end
+
+    test "IPv6 CIDR /128 and /0 boundaries" do
+      Application.put_env(:spore, :allow, ACL.parse_list("2001:db8::1/128"))
+      assert ACL.allow?({0x2001, 0xDB8, 0, 0, 0, 0, 0, 1})
+      refute ACL.allow?({0x2001, 0xDB8, 0, 0, 0, 0, 0, 2})
+
+      Application.put_env(:spore, :allow, ACL.parse_list("::/0"))
+      assert ACL.allow?({0x2001, 0xDB8, 0, 0, 0, 0, 0, 1})
+    end
+
+    test "IPv6 deny rule blocks the matching client" do
+      Application.put_env(:spore, :allow, [])
+      Application.put_env(:spore, :deny, ACL.parse_list("2001:db8:dead::/48"))
+
+      refute ACL.allow?({0x2001, 0xDB8, 0xDEAD, 0, 0, 0, 0, 1})
+      assert ACL.allow?({0x2001, 0xDB8, 0xDEAD + 1, 0, 0, 0, 0, 1})
+    end
+
+    test "IPv4-mapped IPv6 clients match IPv4 rules" do
+      Application.put_env(:spore, :allow, ACL.parse_list("10.0.0.0/8"))
+
+      mapped = {0, 0, 0, 0, 0, 0xFFFF, 0x0A00, 0x0001}
+      assert ACL.allow?(mapped)
+      refute ACL.allow?({0, 0, 0, 0, 0, 0xFFFF, 0x0B00, 0x0001})
+    end
+
+    test "IPv6 CIDR written over a v4-mapped address matches both spellings" do
+      Application.put_env(:spore, :allow, ACL.parse_list("::ffff:10.0.0.0/104"))
+
+      assert ACL.allow?({10, 0, 0, 1})
+      assert ACL.allow?({0, 0, 0, 0, 0, 0xFFFF, 0x0A00, 0x0002})
+      refute ACL.allow?({11, 0, 0, 1})
+    end
+
+    test "IPv6 CIDR with an invalid prefix length is dropped at parse time" do
+      assert ACL.parse_list("2001:db8::/129") == []
+      assert ACL.parse_list("2001:db8::/-1") == []
+      assert ACL.parse_list("1.2.3.4/33") == []
+      assert ACL.parse_list("1.2.3.4/-1") == []
+    end
+
+    test "a real IPv6 client never matches an IPv4 CIDR rule" do
+      Application.put_env(:spore, :allow, ACL.parse_list("10.0.0.0/8"))
+
+      refute ACL.allow?({0x2001, 0xDB8, 0, 0, 0, 0, 0, 1})
+    end
   end
 end

@@ -28,6 +28,8 @@ defmodule Spore.Server do
     max_port = Keyword.get(opts, :max_port, @default_max)
     if min_port > max_port, do: raise(ArgumentError, "port range is empty")
 
+    validate_caps!()
+
     auth =
       case Keyword.get(opts, :secret) do
         nil ->
@@ -65,6 +67,37 @@ defmodule Spore.Server do
       Logger.info("server listening on #{:inet.ntoa(bind_addr)}:#{Shared.control_port()}")
       accept_loop(listen_socket, min_port..max_port, auth, bind_tunnels)
     end
+  end
+
+  # A cap of 0 (or a non-integer) would silently disable the corresponding
+  # limit — reject it up front instead of quietly running unlimited.
+  # Public so the CLI/config paths (and tests) can validate without binding.
+  @doc """
+  Validate the numeric cap settings (`:max_conns_per_ip`, `:max_pending`).
+
+  Accepts unset (`nil`), `:infinity` or a positive integer; anything else
+  raises `ArgumentError`. Called automatically by `listen/1`.
+  """
+  @spec validate_caps!() :: :ok
+  def validate_caps! do
+    for key <- [:max_conns_per_ip, :max_pending] do
+      case Application.get_env(:spore, key) do
+        nil ->
+          :ok
+
+        :infinity ->
+          :ok
+
+        n when is_integer(n) and n > 0 ->
+          :ok
+
+        other ->
+          raise ArgumentError,
+                "invalid :#{key} value #{inspect(other)}: expected a positive integer, :infinity or unset"
+      end
+    end
+
+    :ok
   end
 
   defp accept_loop(listen_socket, port_range, auth, bind_tunnels) do
