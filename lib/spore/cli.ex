@@ -39,6 +39,8 @@ defmodule Spore.CLI do
     keyfile: :string,
     sndbuf: :integer,
     recbuf: :integer,
+    retry: :boolean,
+    retry_delay_ms: :integer,
     otel_enable: :boolean,
     otel_endpoint: :string,
     json_logs: :boolean
@@ -124,6 +126,14 @@ defmodule Spore.CLI do
     if key = Keyword.get(opts, :keyfile), do: Application.put_env(:spore, :client_keyfile, key)
     if sndbuf = Keyword.get(opts, :sndbuf), do: Application.put_env(:spore, :sndbuf, sndbuf)
     if recbuf = Keyword.get(opts, :recbuf), do: Application.put_env(:spore, :recbuf, recbuf)
+    if Keyword.get(opts, :retry), do: Application.put_env(:spore, :retry, true)
+
+    if d = Keyword.get(opts, :retry_delay_ms),
+      do: Application.put_env(:spore, :retry_delay_ms, d)
+
+    # The reconnect path re-authenticates from this value; the HMAC key kept
+    # in the authenticator is the SHA-256 of the secret, not the secret.
+    if secret, do: Application.put_env(:spore, :last_secret, secret)
     if Keyword.get(opts, :otel_enable), do: Application.put_env(:spore, :otel_enable, true)
     if ep = Keyword.get(opts, :otel_endpoint), do: Application.put_env(:spore, :otel_endpoint, ep)
     if Keyword.get(opts, :json_logs), do: Application.put_env(:spore, :json_logs, true)
@@ -223,7 +233,7 @@ defmodule Spore.CLI do
   defp usage(io) do
     IO.puts(io, """
     Usage:
-      spore local [PORT] --to <HOST> [--local-port <PORT>] [--local-host HOST] [--port PORT] [--secret SECRET] [--config FILE.json] [--control-port N] [--tls] [--cacertfile PATH] [--certfile PATH] [--keyfile PATH] [--insecure] [--sndbuf N] [--recbuf N] [--otel-enable] [--otel-endpoint URL] [--json-logs]
+      spore local [PORT] --to <HOST> [--local-port <PORT>] [--local-host HOST] [--port PORT] [--secret SECRET] [--config FILE.json] [--control-port N] [--tls] [--cacertfile PATH] [--certfile PATH] [--keyfile PATH] [--insecure] [--sndbuf N] [--recbuf N] [--retry] [--retry-delay-ms N] [--otel-enable] [--otel-endpoint URL] [--json-logs]
       spore server [--min-port N] [--max-port N] [--secret SECRET] [--bind-addr IP] [--bind-tunnels IP] [--config FILE.json] [--control-port N] [--tls] [--certfile PATH] [--keyfile PATH] [--allow CIDRs] [--deny CIDRs] [--max-conns-per-ip N] [--sndbuf N] [--recbuf N] [--metrics-port N] [--otel-enable] [--otel-endpoint URL] [--json-logs]
     """)
   end

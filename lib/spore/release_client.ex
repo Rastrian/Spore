@@ -2,8 +2,12 @@ defmodule Spore.ReleaseClient do
   @moduledoc false
   # Runs the bore-protocol client inside the `mix release` supervision tree,
   # started from Spore.Application when SPORE_ARGS asks for a local tunnel.
-  # Every termination path exits with a NON-clean reason so the supervisor
-  # restarts the tunnel (replaces the old shell retry loop in sidecars).
+  #
+  # With --retry (application env :spore, :retry), Spore.Client.listen/1
+  # reconnects internally with backoff and only returns if it gives up, which
+  # currently never happens — the in-client retry runs indefinitely. Without
+  # it, every termination path exits NON-clean so the supervisor restarts the
+  # tunnel (crash-restart fallback kept for compatibility).
   use GenServer
   require Logger
 

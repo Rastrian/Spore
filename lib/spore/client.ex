@@ -8,6 +8,9 @@ defmodule Spore.Client do
   alias Spore.Shared.Delimited
   alias Spore.Auth
 
+  @default_retry_delay_ms 5_000
+  @max_retry_delay_ms 60_000
+
   defstruct [:to, :local_host, :local_port, :remote_port, :auth, :conn]
 
   @type t :: %__MODULE__{
@@ -127,16 +130,39 @@ defmodule Spore.Client do
   @doc "Return the publicly available remote port."
   def remote_port(%__MODULE__{remote_port: p}), do: p
 
-  @doc "Start the client control loop."
+  @doc """
+  Start the client control loop. With `retry: true` (or a positive
+  `retry_delay_ms`) the loop reconnects automatically instead of returning:
+  connection loss and failed (re)connects back off exponentially from
+  `retry_delay_ms` up to `max_retry_delay_ms`, indefinitely.
+  """
   @spec listen(t) :: :ok | {:error, term()}
   def listen(%__MODULE__{conn: d} = state) when not is_nil(d) do
-    loop(d, %{state | conn: nil})
+    retry? = Application.get_env(:spore, :retry, false)
+    delay = retry_delay_ms()
+    loop(d, %{state | conn: nil}, retry?, delay)
   end
 
-  defp loop(d, state) do
+  defp retry_delay_ms do
+    case Application.get_env(:spore, :retry_delay_ms) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> @default_retry_delay_ms
+    end
+  end
+
+  defp max_retry_delay_ms do
+    case Application.get_env(:spore, :max_retry_delay_ms) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> @max_retry_delay_ms
+    end
+  end
+
+  # Control loop. `retry?` and `delay` are carried in the tail calls; `delay`
+  # is the next backoff value and resets on every successful (re)connection.
+  defp loop(d, state, retry?, delay) do
     case Delimited.recv(d) do
       {"Heartbeat", d2} ->
-        loop(d2, state)
+        loop(d2, state, retry?, delay)
 
       {%{"Connection" => id}, d2} ->
         Task.start(fn ->
@@ -146,21 +172,60 @@ defmodule Spore.Client do
           end
         end)
 
-        loop(d2, state)
+        loop(d2, state, retry?, delay)
 
       {%{"Error" => err}, _d2} ->
         Logger.error("server error: #{err}")
 
+        if retry?, do: reconnect(state, retry?, delay), else: :ok
+
       {:eof, _} ->
-        :ok
+        if retry?, do: reconnect(state, retry?, delay), else: :ok
 
       {{:error, _}, _} ->
-        :ok
+        if retry?, do: reconnect(state, retry?, delay), else: :ok
 
       _ ->
-        loop(d, state)
+        loop(d, state, retry?, delay)
     end
   end
+
+  # Reconnect loop: re-handshake (which re-requests the remote port), then
+  # re-enter the control loop. Backoff grows exponentially up to
+  # :max_retry_delay_ms and resets to :retry_delay_ms after a success.
+  defp reconnect(state, retry?, delay) do
+    Logger.warning(
+      "spore client: control connection lost; retrying in #{delay}ms (to #{state.to})"
+    )
+
+    Process.sleep(delay)
+
+    case new(state.local_host, state.local_port, state.to, state.remote_port, secret(state)) do
+      {:ok, client} ->
+        Logger.info("spore client: reconnected; listening at #{state.to}:#{client.remote_port}")
+        loop(client.conn, %{client | conn: nil}, retry?, retry_delay_ms())
+
+      {:error, err} ->
+        Logger.error("spore client reconnect failed: #{inspect(err)}")
+        reconnect(state, retry?, next_delay(delay))
+    end
+  end
+
+  defp secret(%{auth: nil}), do: nil
+
+  defp secret(%{auth: %{key: key}}) do
+    # The authenticator only keeps the hashed key; the retry path needs the
+    # original secret, kept in application env by the CLI/daemon boot.
+    case Application.get_env(:spore, :last_secret) do
+      s when is_binary(s) ->
+        if Auth.new(s).key == key, do: s, else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp next_delay(delay), do: min(delay * 2, max_retry_delay_ms())
 
   defp handle_connection(id, %__MODULE__{} = state) do
     with {:ok, remote_conn} <-
