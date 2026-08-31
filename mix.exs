@@ -1,10 +1,14 @@
 defmodule Spore.MixProject do
   use Mix.Project
 
+  # Single source of truth for the version. Everything else (release label,
+  # `spore update --check`, the escript banner) derives from this attribute.
+  @version "0.2.7"
+
   def project do
     [
       app: :spore,
-      version: "0.2.7",
+      version: @version,
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -19,7 +23,10 @@ defmodule Spore.MixProject do
   def application do
     [
       extra_applications: [:logger, :crypto, :ssl],
-      mod: {Spore.Application, []}
+      mod: {Spore.Application, []},
+      # Expose the version as application env so runtime code (spore update
+      # --check) reads the truth from the same place release tooling does.
+      env: [version: @version]
     ]
   end
 

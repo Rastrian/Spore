@@ -11,6 +11,7 @@ spore_control_port =
 
 config :spore, control_port: spore_control_port
 
-# Baked at compile time so `spore update` (and any runtime code) can report
-# the version the binary was built from without touching mix tooling.
-config :spore, version: "0.2.7"
+# The version is NOT configured here: mix.exs exposes it as the :spore
+# application env (single source of truth is the @version attribute in
+# mix.exs). Runtime code reads Application.get_env(:spore, :version); the
+# escript boot path (application not started) falls back to the .app vsn.
