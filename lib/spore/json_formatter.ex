@@ -1,23 +1,28 @@
 defmodule Spore.JsonFormatter do
   @moduledoc false
-  @spec format(
-          atom(),
-          pid(),
-          {Logger, Logger.message(), Logger.Formatter.time(), keyword()},
-          keyword()
-        ) :: IO.chardata()
-  def format(_level, _gl, {Logger, msg, ts, md}, _opts) do
+
+  # Formatter used when --json-logs is enabled. Spore.Application wires it
+  # into the default :logger handler as a `{module, function}` template,
+  # which means :logger calls it as format(level, message, timestamp,
+  # metadata) — four flat arguments, NOT the legacy
+  # (level, gl, {Logger, msg, ts, md}, opts) tuple contract.
+  @spec format(Logger.level(), Logger.message(), Logger.Formatter.time(), keyword()) ::
+          IO.chardata()
+  def format(level, msg, ts, metadata) do
     map = %{
       time: format_time(ts),
-      level: md[:level] || "info",
-      message: iodata_to_binary(msg),
-      module: md[:module],
-      function: md[:function],
-      line: md[:line],
-      pid: inspect(md[:pid] || self())
+      level: to_string(level),
+      message: msg_to_binary(msg),
+      module: metadata[:module],
+      function: metadata[:function],
+      line: metadata[:line],
+      pid: inspect(metadata[:pid] || self())
     }
 
-    [Jason.encode!(Enum.reject(map, fn {_k, v} -> is_nil(v) end)), "\n"]
+    # Enum.reject/2 over a map returns a list of {key, value} tuples, which
+    # Jason cannot encode — convert back to a map before encoding so the
+    # nil-valued keys are simply omitted.
+    [Jason.encode!(Enum.reject(map, fn {_k, v} -> is_nil(v) end) |> Map.new()), "\n"]
   end
 
   defp format_time({date, time}) do
@@ -27,6 +32,15 @@ defmodule Spore.JsonFormatter do
     |> IO.iodata_to_binary()
   end
 
-  defp iodata_to_binary(data) when is_binary(data), do: data
-  defp iodata_to_binary(data), do: IO.iodata_to_binary(data)
+  defp msg_to_binary(msg) when is_binary(msg), do: msg
+
+  defp msg_to_binary(msg) when is_list(msg) do
+    try do
+      IO.iodata_to_binary(msg)
+    rescue
+      _ -> inspect(msg)
+    end
+  end
+
+  defp msg_to_binary(msg), do: inspect(msg)
 end
