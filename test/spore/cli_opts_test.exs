@@ -158,4 +158,42 @@ defmodule Spore.CliOptsTest do
       assert Application.get_env(:spore, :max_conns_per_ip) == 3
     end
   end
+
+  describe "server cap validation" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:spore, :max_conns_per_ip)
+        Application.delete_env(:spore, :max_pending)
+      end)
+
+      :ok
+    end
+
+    test "validate_caps!/0 accepts unset, :infinity and positive values" do
+      :ok = Spore.Server.validate_caps!()
+
+      Application.put_env(:spore, :max_conns_per_ip, 50)
+      Application.put_env(:spore, :max_pending, 100)
+      assert Spore.Server.validate_caps!() == :ok
+
+      Application.put_env(:spore, :max_conns_per_ip, :infinity)
+      assert Spore.Server.validate_caps!() == :ok
+    end
+
+    test "validate_caps!/0 rejects a zero cap with a clear error" do
+      Application.put_env(:spore, :max_conns_per_ip, 0)
+
+      assert_raise ArgumentError, ~r/invalid :max_conns_per_ip value 0/, fn ->
+        Spore.Server.validate_caps!()
+      end
+    end
+
+    test "validate_caps!/0 rejects non-integer cap values" do
+      Application.put_env(:spore, :max_pending, "20")
+
+      assert_raise ArgumentError, ~r/invalid :max_pending value "20"/, fn ->
+        Spore.Server.validate_caps!()
+      end
+    end
+  end
 end
