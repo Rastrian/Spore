@@ -3,7 +3,7 @@ defmodule Spore.MixProject do
 
   # Single source of truth for the version. Everything else (release label,
   # `spore update --check`, the escript banner) derives from this attribute.
-  @version "0.2.7"
+  @version "0.2.8"
 
   def project do
     [
