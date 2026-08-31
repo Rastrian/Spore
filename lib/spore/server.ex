@@ -20,6 +20,7 @@ defmodule Spore.Server do
   @default_min 1024
   @default_max 65535
   @heartbeat_ms 500
+  @accept_retry_ms 1_000
 
   @doc "Start listening for control connections and serve tunnels."
   @spec listen(opts) :: :ok | {:error, term()}
@@ -101,20 +102,29 @@ defmodule Spore.Server do
   end
 
   defp accept_loop(listen_socket, port_range, auth, bind_tunnels) do
-    {:ok, socket} = accept_conn(listen_socket)
-    {:ok, {ip, _}} = :inet.peername(socket)
-    Logger.info("incoming connection from #{:inet.ntoa(ip)}")
+    case accept_conn(listen_socket) do
+      {:ok, socket} ->
+        {:ok, {ip, _}} = :inet.peername(socket)
+        Logger.info("incoming connection from #{:inet.ntoa(ip)}")
 
-    if Spore.ACL.allow?(ip) and Spore.Banlist.allow?(ip) and Spore.Limits.can_open?(ip) do
-      Task.start(fn ->
-        try do
-          handle_connection(socket, port_range, auth, bind_tunnels)
-        after
-          Spore.Limits.close(ip)
+        if Spore.ACL.allow?(ip) and Spore.Banlist.allow?(ip) and Spore.Limits.can_open?(ip) do
+          Task.start(fn ->
+            try do
+              handle_connection(socket, port_range, auth, bind_tunnels)
+            after
+              Spore.Limits.close(ip)
+            end
+          end)
+        else
+          :gen_tcp.close(socket)
         end
-      end)
-    else
-      :gen_tcp.close(socket)
+
+      {:error, reason} ->
+        # A transient accept failure — typically :emfile while an FD storm
+        # drains — must not crash the accept loop and take the whole server
+        # down with it; sleep and try again.
+        Logger.error("accept failed: #{inspect(reason)}; retrying in #{@accept_retry_ms}ms")
+        Process.sleep(@accept_retry_ms)
     end
 
     accept_loop(listen_socket, port_range, auth, bind_tunnels)
