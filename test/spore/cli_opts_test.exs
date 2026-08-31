@@ -21,7 +21,10 @@ defmodule Spore.CliOptsTest do
     :otel_endpoint,
     :json_logs,
     :config_path,
-    :ssl_verify
+    :ssl_verify,
+    :retry,
+    :retry_delay_ms,
+    :last_secret
   ]
 
   setup do
