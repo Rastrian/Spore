@@ -3,6 +3,9 @@ name: Spore Soak
 on:
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   soak-linux:
     runs-on: ubuntu-latest
