@@ -1,0 +1,2 @@
+{"v":1,"id":0,"ts":"2026-09-19T19:56:09Z","ptr":null,"text":"Spore: tunel TCP minimalista em Elixir/OTP, compativel com bore (Rust); frota de 8 VPS rodando spore server.","flags":[]}
+{"v":1,"id":1,"ts":"2026-09-19T19:56:09Z","ptr":null,"text":"Docs: README.md na raiz (protocolo e interop com bore).","flags":[]}
