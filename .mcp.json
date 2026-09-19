@@ -1,0 +1,1 @@
+{"mcpServers":{"janitor":{"command":"/home/rastrian/janitor-prime/target/release/janitor","args":["mcp","--workspace","/home/rastrian/projetos/Spore"]}}}
