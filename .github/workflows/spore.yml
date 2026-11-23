@@ -12,6 +12,8 @@ permissions:
 jobs:
   build:
     runs-on: self-hosted
+    env:
+      ImageOS: ubuntu24
     steps:
       - name: Checkout
         uses: actions/checkout@v4
