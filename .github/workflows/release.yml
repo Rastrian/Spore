@@ -41,7 +41,7 @@ jobs:
     container: ${{ matrix.container_image }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Show elixir version
         run: elixir --version
@@ -70,7 +70,7 @@ jobs:
     runs-on: macos-14
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Elixir and Erlang/OTP
         uses: erlef/setup-beam@v1
@@ -102,7 +102,7 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Elixir and Erlang/OTP
         uses: erlef/setup-beam@v1
@@ -143,7 +143,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Create and push git tag
         if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
