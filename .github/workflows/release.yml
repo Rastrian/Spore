@@ -59,7 +59,7 @@ jobs:
         run: tar czf "spore-${{ matrix.target }}.tar.gz" -C _build/prod/rel spore
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spore-${{ matrix.target }}
           path: spore-${{ matrix.target }}.*
@@ -91,7 +91,7 @@ jobs:
         run: tar czf "spore-macos-aarch64.tar.gz" -C _build/prod/rel spore
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spore-macos-aarch64
           path: spore-macos-aarch64.*
@@ -128,7 +128,7 @@ jobs:
         run: Compress-Archive -Path _build/prod/rel/spore -DestinationPath "spore-windows-x86_64.zip" -Force
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: spore-windows-x86_64
           path: spore-windows-x86_64.*
